@@ -30,6 +30,14 @@ app.whenReady().then(() => {
   registerSnapshotHandlers(DATA_DIR, () => store.key);
   registerSyncHandlers(DATA_DIR, () => store.key);
 
+  // Escape exits kiosk mode
+  globalShortcut.register("Escape", () => {
+    if (mainWindow?.isKiosk()) {
+      mainWindow.setKiosk(false);
+      mainWindow.webContents.send("fullscreen-change", false);
+    }
+  });
+
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -43,8 +51,18 @@ app.whenReady().then(() => {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
-      devTools: true,
+      devTools: process.env.NODE_ENV === "development", // ← fixed
     },
+  });
+
+  mainWindow.on("enter-full-screen", () => {
+    mainWindow?.webContents.send("fullscreen-change", true);
+  });
+  mainWindow.on("leave-full-screen", () => {
+    mainWindow?.webContents.send("fullscreen-change", false);
+  });
+  mainWindow.on("enter-html-full-screen", () => {
+    mainWindow?.webContents.send("fullscreen-change", true);
   });
 
   if (process.env.NODE_ENV === "development") {
@@ -53,17 +71,18 @@ app.whenReady().then(() => {
     mainWindow.loadFile(path.join(__dirname, "..", "..", "dist", "index.html"));
   }
 
-  mainWindow.webContents.on("dom-ready", () => {
-    mainWindow!.webContents.openDevTools({ mode: "detach" });
-  });
+  // ← REMOVED dom-ready DevTools opener
 
   ipcMain.on("win:minimize", () => mainWindow?.minimize());
-  ipcMain.on("win:maximize", () =>
-    mainWindow?.isMaximized()
-      ? mainWindow.unmaximize()
-      : mainWindow?.maximize(),
-  );
-  ipcMain.on("win:close", () => mainWindow?.close());
+  ipcMain.on("win:maximize", () => {
+    if (!mainWindow) return;
+    const isKiosk = mainWindow.isKiosk();
+    mainWindow.setKiosk(!isKiosk);
+    mainWindow.webContents.send("fullscreen-change", !isKiosk);
+  });
+  ipcMain.on("win:close", () => {
+    app.quit();
+  });
 
   globalShortcut.register("CommandOrControl+Shift+L", () => {
     store.clearSession();
@@ -77,5 +96,5 @@ app.on("before-quit", () => {
 });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
+  app.quit(); // quit on all platforms including mac
 });

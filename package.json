@@ -1,7 +1,11 @@
 {
   "name": "axiom-os",
-  "version": "1.0.0",
+  "version": "1.0.4",
   "description": "AXIOM - Private Desktop Environment",
+  "author": {
+    "name": "AXIOM OS",
+    "email": "axiom@axiom.os"
+  },
   "main": "electron/dist/main.js",
   "scripts": {
     "dev": "concurrently \"npm run dev:vite\" \"npm run dev:electron\"",
@@ -18,13 +22,44 @@
     "appId": "io.axiom.os",
     "productName": "AXIOM OS",
     "asar": true,
+    "asarUnpack": [
+      "node_modules/better-sqlite3/**/*",
+      "node_modules/bindings/**/*",
+      "node_modules/file-uri-to-path/**/*"
+    ],
     "directories": {
       "output": "release"
     },
+    "files": [
+      {
+        "from": "dist",
+        "to": "dist",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "electron/dist",
+        "to": "electron/dist",
+        "filter": [
+          "**/*"
+        ]
+      },
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "data/",
+        "to": "data/",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
     "win": {
       "target": [
         {
-          "target": "portable",
+          "target": "nsis",
           "arch": [
             "x64"
           ]
@@ -55,32 +90,12 @@
       ],
       "icon": "assets/icon.png"
     },
-    "extraResources": [
-      {
-        "from": "data/",
-        "to": "data/",
-        "filter": [
-          "**/*"
-        ]
-      }
-    ],
-    "files": [
-      {
-        "from": "dist",
-        "to": "dist",
-        "filter": [
-          "**/*"
-        ]
-      },
-      {
-        "from": "electron/dist",
-        "to": "electron/dist",
-        "filter": [
-          "**/*"
-        ]
-      },
-      "package.json"
-    ]
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "deleteAppDataOnUninstall": false
+    }
   },
   "devDependencies": {
     "@electron/asar": "^4.2.0",
