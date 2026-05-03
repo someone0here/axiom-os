@@ -1,0 +1,61 @@
+name: Build & Release AXIOM OS
+
+on:
+  push:
+    tags:
+      - "v*" # triggers on version tags like v1.0.0, v1.2.3
+  workflow_dispatch: # manual trigger button on GitHub
+
+permissions:
+  contents: write # needed to create releases
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            platform: mac
+          - os: windows-latest
+            platform: win
+          - os: ubuntu-latest
+            platform: linux
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Vite
+        run: npm run build:vite
+
+      - name: Build Electron
+        run: npm run build:electron
+
+      - name: Package Mac
+        if: matrix.platform == 'mac'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder --mac --publish always
+
+      - name: Package Windows
+        if: matrix.platform == 'win'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder --win --publish always
+
+      - name: Package Linux
+        if: matrix.platform == 'linux'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder --linux --publish always

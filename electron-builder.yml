@@ -1,0 +1,38 @@
+# electron-builder.yml
+appId: io.axiom.os
+productName: AXIOM OS
+copyright: Private
+
+directories:
+  output: dist-electron
+  buildResources: assets
+
+files:
+  - dist/**/*
+  - electron/dist/**/*
+
+extraResources:
+  - from: data/
+    to: data/
+    filter: ["**/*"]
+
+win:
+  target:
+    - target: portable # single .exe, no install needed
+      arch: [x64]
+  icon: assets/icon.ico
+
+mac:
+  target:
+    - target: dmg
+      arch: [x64, arm64]
+  icon: assets/icon.icns
+
+linux:
+  target:
+    - target: AppImage # portable single file on Linux
+      arch: [x64]
+  icon: assets/icon.png
+
+portable:
+  artifactName: AXIOM-OS-portable.exe

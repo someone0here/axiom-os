@@ -1,0 +1,121 @@
+{
+  "name": "axiom-os",
+  "version": "1.0.0",
+  "description": "AXIOM - Private Desktop Environment",
+  "main": "electron/dist/main.js",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:vite\" \"npm run dev:electron\"",
+    "dev:vite": "vite",
+    "dev:electron": "wait-on http://localhost:5173 && cross-env NODE_ENV=development electron .",
+    "build": "npm run build:vite && npm run build:electron",
+    "build:vite": "vite build",
+    "build:electron": "tsc -p tsconfig.electron.json",
+    "dist": "npm run build && electron-builder",
+    "dist:portable": "npm run build && electron-builder --win portable",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "build": {
+    "appId": "io.axiom.os",
+    "productName": "AXIOM OS",
+    "asar": true,
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.ico"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.icns"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.png"
+    },
+    "extraResources": [
+      {
+        "from": "data/",
+        "to": "data/",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "files": [
+      {
+        "from": "dist",
+        "to": "dist",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "electron/dist",
+        "to": "electron/dist",
+        "filter": [
+          "**/*"
+        ]
+      },
+      "package.json"
+    ]
+  },
+  "devDependencies": {
+    "@electron/asar": "^4.2.0",
+    "@electron/rebuild": "^4.0.4",
+    "@types/adm-zip": "^0.5.8",
+    "@types/archiver": "^7.0.0",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/electron": "^1.4.38",
+    "@types/node": "^25.6.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "autoprefixer": "^10.5.0",
+    "bytenode": "^1.5.7",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "electron": "^41.3.0",
+    "electron-builder": "^26.8.1",
+    "electron-packager": "^17.1.2",
+    "javascript-obfuscator": "^5.4.2",
+    "postcss": "^8.5.13",
+    "tailwindcss": "^3.4.19",
+    "terser": "^5.46.2",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.10",
+    "wait-on": "^9.0.5"
+  },
+  "dependencies": {
+    "adm-zip": "^0.5.17",
+    "archiver": "^7.0.1",
+    "better-sqlite3": "^12.9.0",
+    "framer-motion": "^12.38.0",
+    "nostr-tools": "^2.23.3",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "zustand": "^5.0.12"
+  }
+}

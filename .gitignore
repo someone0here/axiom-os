@@ -1,0 +1,9 @@
+node_modules/
+dist/
+electron/dist/
+release/
+data/
+*.db
+*.enc
+*.blob
+.env
