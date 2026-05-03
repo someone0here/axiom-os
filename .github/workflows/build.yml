@@ -12,6 +12,7 @@ permissions:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: macos-latest
@@ -31,39 +32,33 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Install Python (Windows)
-        if: matrix.platform == 'win'
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install build tools (Windows)
-        if: matrix.platform == 'win'
-        run: npm install --global windows-build-tools --vs2019
-        continue-on-error: true
-
       - name: Install build tools (Linux)
         if: matrix.platform == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential python3 libnss3 libatk1.0-0 libatk-bridge2.0-0 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 libasound2
+          sudo apt-get install -y \
+            build-essential \
+            python3 \
+            libnss3 \
+            libatk1.0-0t64 \
+            libatk-bridge2.0-0t64 \
+            libdrm2 \
+            libxkbcommon0 \
+            libxcomposite1 \
+            libxdamage1 \
+            libxrandr2 \
+            libgbm1 \
+            libasound2t64 \
+            libgtk-3-0t64 \
+            libx11-xcb1
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Rebuild native modules for Mac
-        if: matrix.platform == 'mac'
-        run: npx electron-rebuild -f -w better-sqlite3
-
-      - name: Rebuild native modules for Windows
-        if: matrix.platform == 'win'
+      - name: Rebuild native modules
         run: npx electron-rebuild -f -w better-sqlite3
         env:
           npm_config_msvs_version: "2019"
-
-      - name: Rebuild native modules for Linux
-        if: matrix.platform == 'linux'
-        run: npx electron-rebuild -f -w better-sqlite3
 
       - name: Build Vite
         run: npm run build:vite
@@ -74,20 +69,14 @@ jobs:
       - name: Package Mac
         if: matrix.platform == 'mac'
         run: npx electron-builder --mac --publish never
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Package Windows
         if: matrix.platform == 'win'
         run: npx electron-builder --win --publish never
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Package Linux
         if: matrix.platform == 'linux'
         run: npx electron-builder --linux --publish never
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Mac
         if: matrix.platform == 'mac'
