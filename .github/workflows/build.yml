@@ -25,6 +25,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -41,18 +42,36 @@ jobs:
 
       - name: Package Mac
         if: matrix.platform == 'mac'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx electron-builder --mac --publish always
+        run: npx electron-builder --mac --publish never
 
       - name: Package Windows
         if: matrix.platform == 'win'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx electron-builder --win --publish always
+        run: npx electron-builder --win --publish never
 
       - name: Package Linux
         if: matrix.platform == 'linux'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx electron-builder --linux --publish always
+        run: npx electron-builder --linux --publish never
+
+      - name: Upload Mac DMG
+        if: matrix.platform == 'mac'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/*.dmg
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Windows EXE
+        if: matrix.platform == 'win'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/*.exe
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Linux AppImage
+        if: matrix.platform == 'linux'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/*.AppImage
+          token: ${{ secrets.GITHUB_TOKEN }}
