@@ -3,11 +3,11 @@ name: Build & Release AXIOM OS
 on:
   push:
     tags:
-      - "v*" # triggers on version tags like v1.0.0, v1.2.3
-  workflow_dispatch: # manual trigger button on GitHub
+      - "v*"
+  workflow_dispatch:
 
 permissions:
-  contents: write # needed to create releases
+  contents: write
 
 jobs:
   build:
@@ -24,13 +24,10 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
