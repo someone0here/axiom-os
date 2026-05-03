@@ -7,3 +7,4 @@ data/
 *.enc
 *.blob
 .env
+.DS_Store
