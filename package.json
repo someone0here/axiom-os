@@ -77,7 +77,7 @@
           ]
         }
       ],
-      "icon": "assets/icons/mac/icon_512x512.png"
+      "icon": "assets/icons/mac/icon.icns"
     },
     "linux": {
       "target": [
