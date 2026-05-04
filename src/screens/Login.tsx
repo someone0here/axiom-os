@@ -15,6 +15,19 @@ export function Login({ profileId, onSuccess, onBack }: Props) {
   const [loading, setLoading] = useState(false);
   const [showPw, setShowPw] = useState(false);
   const [attempts, setAttempts] = useState(0);
+
+  // FIX: recovery phrase state — shown once after setup
+  const [recoveryPhrase, setRecoveryPhrase] = useState<string[]>([]);
+  const [showRecovery, setShowRecovery] = useState(false);
+
+  // FIX: forgot password flow state
+  const [showForgot, setShowForgot] = useState(false);
+  const [recoverPhrase, setRecoverPhrase] = useState("");
+  const [recoverNewPw, setRecoverNewPw] = useState("");
+  const [recoverError, setRecoverError] = useState("");
+  const [recoverLoading, setRecoverLoading] = useState(false);
+  const [recoverSuccess, setRecoverSuccess] = useState(false);
+
   const isSetup = !profileId;
 
   const handle = async () => {
@@ -33,10 +46,17 @@ export function Login({ profileId, onSuccess, onBack }: Props) {
           setLoading(false);
           return;
         }
-        await window.axiom.authSetup(newPw);
-        const res = await window.axiom.authLogin(1, newPw);
-        if (res.success) onSuccess(1);
-        else setError("Setup succeeded but login failed");
+        // FIX: cast because the global type predates recoveryPhrase being returned
+        const res = await (window.axiom.authSetup(newPw) as Promise<{
+          success: boolean;
+          recoveryPhrase?: string;
+        }>);
+        if (res.success && res.recoveryPhrase) {
+          setRecoveryPhrase(res.recoveryPhrase.split(" "));
+          setShowRecovery(true);
+        } else {
+          setError("Setup failed");
+        }
       } else {
         const res = await window.axiom.authLogin(profileId!, password);
         if (res.success) {
@@ -58,6 +78,177 @@ export function Login({ profileId, onSuccess, onBack }: Props) {
     setLoading(false);
   };
 
+  const handleRecover = async () => {
+    if (recoverLoading) return;
+    setRecoverError("");
+    if (!recoverPhrase.trim()) {
+      setRecoverError("Please enter your recovery phrase");
+      return;
+    }
+    if (recoverNewPw.length < 6) {
+      setRecoverError("New password must be at least 6 characters");
+      return;
+    }
+    setRecoverLoading(true);
+    try {
+      // FIX: cast because authRecover is absent from the stale global type
+      const axiom = window.axiom as typeof window.axiom & {
+        authRecover: (
+          phrase: string,
+          newPassword: string,
+        ) => Promise<{ success: boolean; error?: string }>;
+      };
+      const res = await axiom.authRecover(recoverPhrase, recoverNewPw);
+      if (res.success) {
+        setRecoverSuccess(true);
+      } else {
+        setRecoverError(res.error ?? "Recovery phrase not recognized");
+      }
+    } catch {
+      setRecoverError("An error occurred");
+    }
+    setRecoverLoading(false);
+  };
+
+  // FIX: recovery phrase display — shown once after first-time setup
+  if (showRecovery) {
+    return (
+      <motion.div
+        className="fixed inset-0 bg-[#040409] flex items-center justify-center"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+      >
+        <div className="w-96 p-8 rounded-2xl bg-white/[0.04] border border-white/[0.08] flex flex-col gap-5">
+          <div className="text-center">
+            <div className="text-lg mb-1">⚠️</div>
+            <div className="text-sm font-semibold text-slate-200">
+              Write This Down
+            </div>
+            <div className="text-[10px] text-slate-600 mt-1">
+              This is the ONLY way to recover your vault if you forget your
+              password. Store it somewhere safe. It will never be shown again.
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2">
+            {recoveryPhrase.map((word, i) => (
+              <div
+                key={i}
+                className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-white/[0.04] border border-white/[0.07]"
+              >
+                <span className="text-[8px] text-slate-700 w-3">{i + 1}.</span>
+                <span className="text-[11px] text-slate-300 font-mono">
+                  {word}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          <button
+            onClick={async () => {
+              // Login immediately after the user acknowledges the phrase
+              const res = await window.axiom.authLogin(1, newPw);
+              setShowRecovery(false);
+              if (res.success) {
+                onSuccess(1);
+              } else {
+                setError("Setup succeeded but login failed");
+              }
+            }}
+            className="w-full py-3 rounded-xl bg-cyan-500/10 border border-cyan-500/25 text-cyan-400 text-xs font-bold tracking-widest uppercase hover:bg-cyan-500/20 transition-all"
+          >
+            I Have Written These Down
+          </button>
+        </div>
+      </motion.div>
+    );
+  }
+
+  // FIX: forgot password / recovery flow
+  if (showForgot) {
+    return (
+      <motion.div
+        className="fixed inset-0 bg-[#040409] flex items-center justify-center"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+      >
+        <div className="w-80 p-8 rounded-2xl bg-white/[0.04] border border-white/[0.08] flex flex-col items-center gap-5">
+          <div className="text-center">
+            <div className="text-sm font-semibold text-slate-200">
+              Recover Vault
+            </div>
+            <div className="text-[10px] text-slate-600 mt-1">
+              Enter your 12-word recovery phrase and a new password
+            </div>
+          </div>
+
+          {recoverSuccess ? (
+            <>
+              <div className="text-center">
+                <div className="text-lg mb-1">✅</div>
+                <div className="text-xs text-slate-300">
+                  Password updated successfully
+                </div>
+                <div className="text-[10px] text-slate-600 mt-1">
+                  You can now log in with your new password
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setShowForgot(false);
+                  setRecoverPhrase("");
+                  setRecoverNewPw("");
+                  setRecoverSuccess(false);
+                }}
+                className="w-full py-3 rounded-xl bg-cyan-500/10 border border-cyan-500/25 text-cyan-400 text-xs font-bold tracking-widest uppercase hover:bg-cyan-500/20 transition-all"
+              >
+                Back to Login
+              </button>
+            </>
+          ) : (
+            <>
+              <textarea
+                placeholder="Enter your 12-word recovery phrase..."
+                value={recoverPhrase}
+                onChange={(e) => setRecoverPhrase(e.target.value)}
+                rows={3}
+                className="w-full px-4 py-3 rounded-xl bg-white/[0.05] border border-white/[0.08] text-slate-200 text-xs outline-none focus:border-cyan-500/40 font-mono placeholder:font-sans placeholder:text-slate-600 resize-none"
+              />
+              <input
+                type="password"
+                placeholder="New password"
+                value={recoverNewPw}
+                onChange={(e) => setRecoverNewPw(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleRecover()}
+                className="w-full px-4 py-3 rounded-xl bg-white/[0.05] border border-white/[0.08] text-slate-200 text-sm outline-none focus:border-cyan-500/40 tracking-widest placeholder:tracking-normal placeholder:text-slate-600"
+              />
+              {recoverError && (
+                <p className="text-[10px] text-red-400 text-center">
+                  {recoverError}
+                </p>
+              )}
+              <button
+                onClick={handleRecover}
+                disabled={recoverLoading}
+                className="w-full py-3 rounded-xl bg-cyan-500/10 border border-cyan-500/25 text-cyan-400 text-xs font-bold tracking-widest uppercase hover:bg-cyan-500/[0.18] transition-all disabled:opacity-30"
+              >
+                {recoverLoading ? "Verifying..." : "Reset Password"}
+              </button>
+              <button
+                onClick={() => setShowForgot(false)}
+                className="text-[10px] text-slate-700 hover:text-slate-400 transition-colors"
+              >
+                ← Back to login
+              </button>
+            </>
+          )}
+        </div>
+      </motion.div>
+    );
+  }
+
+  // Normal login / setup screen
   return (
     <motion.div
       className="fixed inset-0 bg-[#040409] flex items-center justify-center"
@@ -126,12 +317,21 @@ export function Login({ profileId, onSuccess, onBack }: Props) {
           {loading ? "Verifying..." : isSetup ? "Create & Enter" : "Unlock"}
         </button>
         {!isSetup && (
-          <button
-            onClick={onBack}
-            className="text-[10px] text-slate-700 hover:text-slate-400 transition-colors"
-          >
-            ← Back
-          </button>
+          <>
+            {/* FIX: forgot password link */}
+            <button
+              onClick={() => setShowForgot(true)}
+              className="text-[9px] text-slate-700 hover:text-slate-400 transition-colors"
+            >
+              Forgot password? Use recovery phrase
+            </button>
+            <button
+              onClick={onBack}
+              className="text-[10px] text-slate-700 hover:text-slate-400 transition-colors"
+            >
+              ← Back
+            </button>
+          </>
         )}
       </div>
     </motion.div>

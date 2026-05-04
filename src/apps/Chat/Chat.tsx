@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   generateSecretKey,
   getPublicKey,
@@ -42,16 +42,6 @@ interface Identity {
   hexPub: string;
 }
 
-// Convert between hex and npub/nsec
-function hexToNpub(hex: string): string {
-  return nip19.npubEncode(hex);
-}
-function hexToNsec(hex: string): string {
-  const bytes = new Uint8Array(
-    hex.match(/.{1,2}/g)!.map((b) => parseInt(b, 16)),
-  );
-  return nip19.nsecEncode(bytes);
-}
 function npubToHex(npub: string): string | null {
   try {
     const decoded = nip19.decode(npub);
@@ -84,7 +74,7 @@ export default function Chat() {
   const [sending, setSending] = useState(false);
 
   const poolRef = useRef<SimplePool | null>(null);
-  const subRef = useRef<any>(null);
+
   const messagesEnd = useRef<HTMLDivElement>(null);
   const allMessages = useRef<Map<string, Message[]>>(new Map());
 
@@ -120,15 +110,15 @@ export default function Chat() {
   };
 
   const generateIdentity = async () => {
-    // Generate new Nostr keypair
     const privKeyBytes = generateSecretKey();
     const hexPriv = bytesToHex(privKeyBytes);
     const hexPub = getPublicKey(privKeyBytes);
-    const npub = hexToNpub(hexPub);
-    const nsec = hexToNsec(hexPriv);
+    const npub = nip19.npubEncode(hexPub);
+
+    // nsec encode using the bytes directly
+    const nsec = nip19.nsecEncode(privKeyBytes);
 
     const id: Identity = { nsec, npub, hexPriv, hexPub };
-    // Store encrypted in AXIOM vault
     await window.axiom.settingsSet("chat_identity", JSON.stringify(id));
     setIdentity(id);
     setView("chat");
@@ -160,80 +150,69 @@ export default function Chat() {
       },
     });
 
-    subRef.current = sub;
-
     return () => {
       sub.close();
       pool.close(RELAYS);
     };
   }, [identity, view]);
 
-  const handleIncomingEvent = useCallback(
-    async (event: Event, id: Identity) => {
-      try {
-        const isSent = event.pubkey === id.hexPub;
-        const otherHex = isSent
-          ? event.tags.find((t) => t[0] === "p")?.[1]
-          : event.pubkey;
+  const handleIncomingEvent = async (event: Event, id: Identity) => {
+    try {
+      const isSent = event.pubkey === id.hexPub;
+      const otherHex = isSent
+        ? event.tags.find((t) => t[0] === "p")?.[1]
+        : event.pubkey;
 
-        if (!otherHex) return;
+      if (!otherHex) return;
 
-        // Decrypt the message
-        const privBytes = new Uint8Array(
-          identity.hexPriv.match(/.{1,2}/g)!.map((b) => parseInt(b, 16)),
+      // ← Pass hex string directly, NOT Uint8Array
+      const decrypted = await nip04.decrypt(
+        id.hexPriv,
+        otherHex,
+        event.content,
+      );
+
+      const msg: Message = {
+        id: event.id,
+        from: event.pubkey,
+        to: otherHex,
+        content: decrypted,
+        timestamp: event.created_at * 1000,
+        sent: isSent,
+      };
+
+      const contactKey = otherHex;
+      const existing = allMessages.current.get(contactKey) || [];
+      if (!existing.find((m) => m.id === msg.id)) {
+        const updated = [...existing, msg].sort(
+          (a, b) => a.timestamp - b.timestamp,
         );
-        const decrypted = await nip04.decrypt(
-          privBytes,
-          otherHex,
-          event.content,
+        allMessages.current.set(contactKey, updated);
+
+        setContacts((prev) =>
+          prev.map((c) =>
+            c.hexPub === contactKey
+              ? {
+                  ...c,
+                  lastMessage: decrypted.slice(0, 40),
+                  lastTime: msg.timestamp,
+                  unread: isSent ? c.unread : c.unread + 1,
+                }
+              : c,
+          ),
         );
 
-        const msg: Message = {
-          id: event.id,
-          from: event.pubkey,
-          to: otherHex,
-          content: decrypted,
-          timestamp: event.created_at * 1000,
-          sent: isSent,
-        };
-
-        // Store in allMessages map keyed by contact hex
-        const contactKey = otherHex;
-        const existing = allMessages.current.get(contactKey) || [];
-        if (!existing.find((m) => m.id === msg.id)) {
-          const updated = [...existing, msg].sort(
-            (a, b) => a.timestamp - b.timestamp,
-          );
-          allMessages.current.set(contactKey, updated);
-
-          // Update contact's last message
-          setContacts((prev) =>
-            prev.map((c) =>
-              c.hexPub === contactKey
-                ? {
-                    ...c,
-                    lastMessage: decrypted.slice(0, 40),
-                    lastTime: msg.timestamp,
-                    unread: isSent ? c.unread : c.unread + 1,
-                  }
-                : c,
-            ),
-          );
-
-          // If this contact is active, update messages
-          setActiveContact((prev) => {
-            if (prev?.hexPub === contactKey) {
-              setMessages(allMessages.current.get(contactKey) || []);
-            }
-            return prev;
-          });
-        }
-      } catch (err) {
-        // Decryption failed — message from unknown contact, ignore
+        setActiveContact((prev) => {
+          if (prev?.hexPub === contactKey) {
+            setMessages(allMessages.current.get(contactKey) || []);
+          }
+          return prev;
+        });
       }
-    },
-    [],
-  );
+    } catch (err) {
+      console.error("[chat] decrypt failed:", err);
+    }
+  };
 
   const sendMessage = async () => {
     if (!input.trim() || !activeContact || !identity || sending) return;
@@ -242,18 +221,18 @@ export default function Chat() {
     setInput("");
 
     try {
-      const privBytes = new Uint8Array(
-        identity.hexPriv.match(/.{1,2}/g)!.map((b) => parseInt(b, 16)),
-      );
-
-      // Encrypt with NIP-04
+      // ← Pass hex string directly, NOT Uint8Array
       const encrypted = await nip04.encrypt(
-        privBytes,
+        identity.hexPriv,
         activeContact.hexPub,
         text,
       );
 
-      // Build and sign the event
+      // Build private key bytes for signing only
+      const privBytes = new Uint8Array(
+        identity.hexPriv.match(/.{1,2}/g)!.map((b) => parseInt(b, 16)),
+      );
+
       const event = finalizeEvent(
         {
           kind: 4,
@@ -264,10 +243,18 @@ export default function Chat() {
         privBytes,
       );
 
-      // Publish to all relays
-      await Promise.any(poolRef.current!.publish(RELAYS, event));
+      // Publish to relays with timeout
+      const publishPromise = Promise.any(
+        poolRef.current!.publish(RELAYS, event),
+      );
+      await Promise.race([
+        publishPromise,
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("timeout")), 8000),
+        ),
+      ]);
 
-      // Add to local state immediately (optimistic)
+      // Add to local state immediately
       const msg: Message = {
         id: event.id,
         from: identity.hexPub,
@@ -295,9 +282,12 @@ export default function Chat() {
         );
       }
     } catch (err) {
-      console.error("Send failed:", err);
+      console.error("[chat] send failed:", err);
       setInput(text); // restore on failure
+      // Show error to user
+      alert("Failed to send. Check your connection.");
     }
+
     setSending(false);
   };
 

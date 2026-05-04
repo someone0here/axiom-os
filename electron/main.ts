@@ -21,6 +21,17 @@ app.whenReady().then(() => {
 
   getDB(DATA_DIR);
 
+  // Set dock/taskbar icon (macOS needs this separately in dev mode)
+  const iconPath = path.join(app.getAppPath(), "assets", "icons", "icon.png");
+  console.log("[icon] looking for icon at:", iconPath);
+  try {
+    if (process.platform === "darwin" && app.dock) {
+      app.dock.setIcon(iconPath);
+    }
+  } catch (e) {
+    console.warn("Could not set dock icon:", e);
+  }
+
   registerAuthHandlers(DATA_DIR);
   registerNotesHandlers(DATA_DIR);
   registerPasswordHandlers(DATA_DIR);
@@ -43,6 +54,7 @@ app.whenReady().then(() => {
     height: 800,
     frame: false,
     titleBarStyle: "hidden",
+    icon: iconPath,
     trafficLightPosition: { x: -100, y: -100 },
     fullscreenable: true,
     transparent: false,

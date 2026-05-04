@@ -3,21 +3,22 @@ import { AnimatePresence } from "framer-motion";
 import { Boot } from "./screens/Boot";
 import { ProfileSelect } from "./screens/ProfileSelect";
 import { Login } from "./screens/Login";
+import { Onboarding } from "./screens/Onboarding";
 import { Desktop } from "./screens/Desktop";
 import { useAuth } from "./store/auth";
 import { useUi } from "./store/ui";
 
-type Screen = "boot" | "profile-select" | "login" | "desktop";
+type Screen = "boot" | "profile-select" | "login" | "onboarding" | "desktop";
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>("boot");
   const [selectedProfile, setSelectedProfile] = useState<number | null>(null);
   const { setLoggedIn, setNeedsSetup } = useAuth();
-  const { unlock } = useUi();
+  const { unlock, lock } = useUi();
 
   useEffect(() => {
     window.axiom.onForceLock(() => {
-      if (screen === "desktop") unlock(); // triggers lock overlay
+      if (screen === "desktop") lock();
     });
   }, [screen]);
 
@@ -29,6 +30,22 @@ export default function App() {
     } else {
       setScreen("profile-select");
     }
+  };
+
+  const handleLoginSuccess = async (id: number) => {
+    setLoggedIn(id);
+    // Check if this user has seen onboarding
+    const seen = await window.axiom.settingsGet("onboarding_done");
+    if (!seen) {
+      setScreen("onboarding");
+    } else {
+      setScreen("desktop");
+    }
+  };
+
+  const handleOnboardingComplete = async () => {
+    await window.axiom.settingsSet("onboarding_done", "true");
+    setScreen("desktop");
   };
 
   return (
@@ -50,12 +67,12 @@ export default function App() {
           <Login
             key="login"
             profileId={selectedProfile}
-            onSuccess={(id) => {
-              setLoggedIn(id);
-              setScreen("desktop");
-            }}
+            onSuccess={handleLoginSuccess}
             onBack={() => setScreen("profile-select")}
           />
+        )}
+        {screen === "onboarding" && (
+          <Onboarding key="onboarding" onComplete={handleOnboardingComplete} />
         )}
         {screen === "desktop" && <Desktop key="desktop" />}
       </AnimatePresence>

@@ -65,7 +65,7 @@
           ]
         }
       ],
-      "icon": "assets/icon.ico"
+      "icon": "assets/icons/win/icon.ico"
     },
     "mac": {
       "target": [
@@ -77,7 +77,7 @@
           ]
         }
       ],
-      "icon": "assets/icon.icns"
+      "icon": "assets/icons/mac/icon_512x512.png"
     },
     "linux": {
       "target": [
@@ -88,7 +88,7 @@
           ]
         }
       ],
-      "icon": "assets/icon.png"
+      "icon": "assets/icons/png/"
     },
     "nsis": {
       "oneClick": true,
@@ -124,9 +124,11 @@
     "wait-on": "^9.0.5"
   },
   "dependencies": {
+    "@types/bip39": "^2.4.2",
     "adm-zip": "^0.5.17",
     "archiver": "^7.0.1",
     "better-sqlite3": "^12.9.0",
+    "bip39": "^3.1.0",
     "framer-motion": "^12.38.0",
     "nostr-tools": "^2.23.3",
     "react": "^19.2.5",

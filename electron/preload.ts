@@ -3,6 +3,8 @@ import { contextBridge, ipcRenderer } from "electron";
 contextBridge.exposeInMainWorld("axiom", {
   authNeedsSetup: () => ipcRenderer.invoke("auth:needs-setup"),
   authSetup: (password: string) => ipcRenderer.invoke("auth:setup", password),
+  authRecover: (phrase: string, newPassword: string) =>
+    ipcRenderer.invoke("auth:recover", phrase, newPassword),
   authLogin: (profileId: number, password: string) =>
     ipcRenderer.invoke("auth:login", profileId, password),
   authLogout: () => ipcRenderer.invoke("auth:logout"),
