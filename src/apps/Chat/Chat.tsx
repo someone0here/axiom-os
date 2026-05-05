@@ -9,12 +9,13 @@ import {
   type Event,
 } from "nostr-tools";
 
-// Public relays — messages route through these automatically
 const RELAYS = [
   "wss://relay.damus.io",
-  "wss://relay.nostr.band",
   "wss://nos.lol",
-  "wss://relay.snort.social",
+  "wss://relay.primal.net",
+  "wss://relay.nostr.band",
+  "wss://offchain.pub",
+  "wss://nostr.mom",
 ];
 
 interface Message {
@@ -23,7 +24,7 @@ interface Message {
   to: string;
   content: string;
   timestamp: number;
-  sent: boolean; // true = I sent it
+  sent: boolean;
 }
 
 interface Contact {
@@ -51,11 +52,13 @@ function npubToHex(npub: string): string | null {
     return null;
   }
 }
+
 function bytesToHex(bytes: Uint8Array): string {
   return Array.from(bytes)
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
 }
+
 export default function Chat() {
   const [identity, setIdentity] = useState<Identity | null>(null);
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -74,32 +77,27 @@ export default function Chat() {
   const [sending, setSending] = useState(false);
 
   const poolRef = useRef<SimplePool | null>(null);
-
+  const identityRef = useRef<Identity | null>(null);
   const messagesEnd = useRef<HTMLDivElement>(null);
   const allMessages = useRef<Map<string, Message[]>>(new Map());
 
-  // Scroll to bottom on new messages
   useEffect(() => {
     messagesEnd.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Load or create identity from AXIOM vault (settings)
   useEffect(() => {
     initIdentity();
   }, []);
 
   const initIdentity = async () => {
-    // Try to load existing identity from encrypted settings
     const stored = await window.axiom.settingsGet("chat_identity");
     if (stored) {
       try {
         const parsed = JSON.parse(stored);
+        identityRef.current = parsed;
         setIdentity(parsed);
-        // Load contacts
         const storedContacts = await window.axiom.settingsGet("chat_contacts");
-        if (storedContacts) {
-          setContacts(JSON.parse(storedContacts));
-        }
+        if (storedContacts) setContacts(JSON.parse(storedContacts));
         setView("chat");
         return;
       } catch {
@@ -114,12 +112,10 @@ export default function Chat() {
     const hexPriv = bytesToHex(privKeyBytes);
     const hexPub = getPublicKey(privKeyBytes);
     const npub = nip19.npubEncode(hexPub);
-
-    // nsec encode using the bytes directly
     const nsec = nip19.nsecEncode(privKeyBytes);
-
     const id: Identity = { nsec, npub, hexPriv, hexPub };
     await window.axiom.settingsSet("chat_identity", JSON.stringify(id));
+    identityRef.current = id;
     setIdentity(id);
     setView("chat");
   };
@@ -130,19 +126,20 @@ export default function Chat() {
 
     const pool = new SimplePool();
     poolRef.current = pool;
-
     setStatus("connecting");
 
-    // Subscribe to all DMs sent TO us
-    const since = Math.floor(Date.now() / 1000) - 30 * 24 * 60 * 60;
+    // 7 days — 30 days risks relay rate limits
+    const since = Math.floor(Date.now() / 1000) - 7 * 24 * 60 * 60;
     const filters = [
       { kinds: [4], "#p": [identity.hexPub], since },
       { kinds: [4], authors: [identity.hexPub], since },
     ] as any;
 
     const sub = pool.subscribeMany(RELAYS, filters, {
-      onevent: async (event: Event) => {
-        await handleIncomingEvent(event, identity);
+      onevent: (event: Event) => {
+        const id = identityRef.current;
+        if (!id) return;
+        handleIncomingEvent(event, id);
         setStatus("connected");
       },
       oneose: () => {
@@ -165,7 +162,6 @@ export default function Chat() {
 
       if (!otherHex) return;
 
-      // ← Pass hex string directly, NOT Uint8Array
       const decrypted = await nip04.decrypt(
         id.hexPriv,
         otherHex,
@@ -183,57 +179,65 @@ export default function Chat() {
 
       const contactKey = otherHex;
       const existing = allMessages.current.get(contactKey) || [];
-      if (!existing.find((m) => m.id === msg.id)) {
-        const updated = [...existing, msg].sort(
-          (a, b) => a.timestamp - b.timestamp,
-        );
-        allMessages.current.set(contactKey, updated);
 
-        setContacts((prev) =>
-          prev.map((c) =>
-            c.hexPub === contactKey
-              ? {
-                  ...c,
-                  lastMessage: decrypted.slice(0, 40),
-                  lastTime: msg.timestamp,
-                  unread: isSent ? c.unread : c.unread + 1,
-                }
-              : c,
-          ),
-        );
+      // Deduplicate
+      if (existing.find((m) => m.id === msg.id)) return;
 
-        setActiveContact((prev) => {
-          if (prev?.hexPub === contactKey) {
-            setMessages(allMessages.current.get(contactKey) || []);
-          }
-          return prev;
-        });
-      }
-    } catch (err) {
-      console.error("[chat] decrypt failed:", err);
+      const updated = [...existing, msg].sort(
+        (a, b) => a.timestamp - b.timestamp,
+      );
+      allMessages.current.set(contactKey, updated);
+
+      setContacts((prev) =>
+        prev.map((c) =>
+          c.hexPub === contactKey
+            ? {
+                ...c,
+                lastMessage: decrypted.slice(0, 40),
+                lastTime: msg.timestamp,
+                unread: isSent ? c.unread : c.unread + 1,
+              }
+            : c,
+        ),
+      );
+
+      // Update messages if this contact is currently open
+      setActiveContact((prev) => {
+        if (prev?.hexPub === contactKey) {
+          setMessages([...updated]);
+        }
+        return prev;
+      });
+    } catch {
+      // Decryption failure expected for messages from unknown contacts
     }
   };
 
   const sendMessage = async () => {
     if (!input.trim() || !activeContact || !identity || sending) return;
+    if (!poolRef.current) {
+      alert("Not connected to relays. Please wait.");
+      return;
+    }
+
     setSending(true);
     const text = input.trim();
     setInput("");
 
+    // Build the event first
+    let event: ReturnType<typeof finalizeEvent>;
     try {
-      // ← Pass hex string directly, NOT Uint8Array
       const encrypted = await nip04.encrypt(
         identity.hexPriv,
         activeContact.hexPub,
         text,
       );
 
-      // Build private key bytes for signing only
       const privBytes = new Uint8Array(
         identity.hexPriv.match(/.{1,2}/g)!.map((b) => parseInt(b, 16)),
       );
 
-      const event = finalizeEvent(
+      event = finalizeEvent(
         {
           kind: 4,
           created_at: Math.floor(Date.now() / 1000),
@@ -242,50 +246,58 @@ export default function Chat() {
         },
         privBytes,
       );
+    } catch (err) {
+      console.error("[chat] Failed to build event:", err);
+      setInput(text);
+      setSending(false);
+      alert("Failed to encrypt message.");
+      return;
+    }
 
-      // Publish to relays with timeout
-      const publishPromise = Promise.any(
-        poolRef.current!.publish(RELAYS, event),
+    // Add to local state IMMEDIATELY (optimistic)
+    const msg: Message = {
+      id: event.id,
+      from: identity.hexPub,
+      to: activeContact.hexPub,
+      content: text,
+      timestamp: event.created_at * 1000,
+      sent: true,
+    };
+
+    const existing = allMessages.current.get(activeContact.hexPub) || [];
+    if (!existing.find((m) => m.id === msg.id)) {
+      const updated = [...existing, msg];
+      allMessages.current.set(activeContact.hexPub, updated);
+      setMessages(updated);
+      setContacts((prev) =>
+        prev.map((c) =>
+          c.hexPub === activeContact.hexPub
+            ? { ...c, lastMessage: text.slice(0, 40), lastTime: msg.timestamp }
+            : c,
+        ),
       );
+    }
+
+    // Publish in background — don't block UI
+    try {
+      const publishResults = poolRef.current.publish(RELAYS, event);
       await Promise.race([
-        publishPromise,
+        Promise.any(publishResults),
         new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("timeout")), 8000),
+          setTimeout(() => reject(new Error("timeout")), 10000),
         ),
       ]);
-
-      // Add to local state immediately
-      const msg: Message = {
-        id: event.id,
-        from: identity.hexPub,
-        to: activeContact.hexPub,
-        content: text,
-        timestamp: event.created_at * 1000,
-        sent: true,
-      };
-
-      const existing = allMessages.current.get(activeContact.hexPub) || [];
-      if (!existing.find((m) => m.id === msg.id)) {
-        const updated = [...existing, msg];
-        allMessages.current.set(activeContact.hexPub, updated);
-        setMessages(updated);
-        setContacts((prev) =>
-          prev.map((c) =>
-            c.hexPub === activeContact.hexPub
-              ? {
-                  ...c,
-                  lastMessage: text.slice(0, 40),
-                  lastTime: msg.timestamp,
-                }
-              : c,
-          ),
-        );
-      }
+      console.log("[chat] Published:", event.id);
     } catch (err) {
-      console.error("[chat] send failed:", err);
-      setInput(text); // restore on failure
-      // Show error to user
-      alert("Failed to send. Check your connection.");
+      console.error("[chat] Publish failed:", err);
+      // Keep message in UI but mark with warning
+      setContacts((prev) =>
+        prev.map((c) =>
+          c.hexPub === activeContact.hexPub
+            ? { ...c, lastMessage: "⚠️ " + text.slice(0, 35) }
+            : c,
+        ),
+      );
     }
 
     setSending(false);
@@ -326,8 +338,7 @@ export default function Chat() {
   const selectContact = (contact: Contact) => {
     setActiveContact(contact);
     const msgs = allMessages.current.get(contact.hexPub) || [];
-    setMessages(msgs);
-    // Clear unread
+    setMessages([...msgs]);
     setContacts((prev) =>
       prev.map((c) => (c.hexPub === contact.hexPub ? { ...c, unread: 0 } : c)),
     );
@@ -411,7 +422,6 @@ export default function Chat() {
               {copied ? "✓" : "Copy"}
             </button>
           </div>
-          {/* Relay status indicator */}
           <div className="flex items-center gap-1.5 mt-2">
             <div
               className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
@@ -457,12 +467,11 @@ export default function Chat() {
               <div
                 key={c.hexPub}
                 onClick={() => selectContact(c)}
-                className={`px-3 py-2.5 cursor-pointer border-b border-white/[0.03] transition-colors
-                  ${
-                    activeContact?.hexPub === c.hexPub
-                      ? "bg-cyan-500/[0.07] border-l-2 border-l-cyan-500"
-                      : "hover:bg-white/[0.03]"
-                  }`}
+                className={`px-3 py-2.5 cursor-pointer border-b border-white/[0.03] transition-colors ${
+                  activeContact?.hexPub === c.hexPub
+                    ? "bg-cyan-500/[0.07] border-l-2 border-l-cyan-500"
+                    : "hover:bg-white/[0.03]"
+                }`}
               >
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-medium text-slate-300 truncate">
@@ -491,7 +500,7 @@ export default function Chat() {
       </div>
 
       {/* Main chat area */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col relative">
         {/* Add Contact Modal */}
         {addingContact && (
           <div className="absolute inset-0 z-50 bg-black/80 flex items-center justify-center">
@@ -528,7 +537,7 @@ export default function Chat() {
               <div className="flex gap-2">
                 <button
                   onClick={addContact}
-                  className="flex-1 py-2.5 rounded-xl bg-cyan-500/10 border border-cyan-500/25 text-cyan-400 text-[11px] hover:bg-cyan-500/18"
+                  className="flex-1 py-2.5 rounded-xl bg-cyan-500/10 border border-cyan-500/25 text-cyan-400 text-[11px] hover:bg-cyan-500/20 transition-all"
                 >
                   Add Contact
                 </button>
@@ -547,7 +556,6 @@ export default function Chat() {
         )}
 
         {!activeContact ? (
-          /* Empty state */
           <div className="flex flex-col items-center justify-center h-full gap-3 text-slate-700">
             <span className="text-5xl opacity-20">💬</span>
             <p className="text-[11px]">Select a contact to start chatting</p>
@@ -578,7 +586,11 @@ export default function Chat() {
                 </div>
               </div>
               <div
-                className={`w-2 h-2 rounded-full ${status === "connected" ? "bg-green-400" : "bg-yellow-400 animate-pulse"}`}
+                className={`w-2 h-2 rounded-full ${
+                  status === "connected"
+                    ? "bg-green-400"
+                    : "bg-yellow-400 animate-pulse"
+                }`}
               />
             </div>
 
@@ -588,7 +600,7 @@ export default function Chat() {
                 <div className="flex flex-col items-center justify-center h-full gap-2 text-slate-800">
                   <span className="text-3xl opacity-20">🔐</span>
                   <p className="text-[10px]">No messages yet. Say hello!</p>
-                  <p className="text-[9px] text-slate-800 text-center">
+                  <p className="text-[9px] text-center">
                     All messages are encrypted end-to-end via Nostr NIP-04
                   </p>
                 </div>
@@ -612,8 +624,7 @@ export default function Chat() {
                         className={`flex ${msg.sent ? "justify-end" : "justify-start"}`}
                       >
                         <div
-                          className={`max-w-[72%] px-3 py-2 rounded-2xl text-[11px] leading-relaxed break-words
-                          ${
+                          className={`max-w-[72%] px-3 py-2 rounded-2xl text-[11px] leading-relaxed break-words ${
                             msg.sent
                               ? "bg-cyan-500/20 border border-cyan-500/20 text-slate-200 rounded-br-sm"
                               : "bg-white/[0.06] border border-white/[0.07] text-slate-300 rounded-bl-sm"
