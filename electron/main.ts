@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, globalShortcut } from "electron";
 import path from "path";
+import fs from "fs";
 import { getDB } from "./db/index";
 import { store } from "./store";
 import { registerAuthHandlers } from "./ipc/auth";
@@ -13,24 +14,38 @@ import { registerSyncHandlers } from "./ipc/sync";
 
 let mainWindow: BrowserWindow | null = null;
 
+// Find the correct path to index.html regardless of platform
+function getIndexPath(): string {
+  // In production, __dirname = .../resources/app.asar/electron/dist
+  // index.html = .../resources/app.asar/dist/index.html
+  const candidates = [
+    path.join(__dirname, "..", "..", "dist", "index.html"),
+    path.join(__dirname, "..", "dist", "index.html"),
+    path.join(app.getAppPath(), "dist", "index.html"),
+    path.join(process.resourcesPath, "app.asar", "dist", "index.html"),
+  ];
+
+  for (const p of candidates) {
+    if (fs.existsSync(p)) {
+      console.log("[AXIOM] Found index.html at:", p);
+      return p;
+    }
+  }
+
+  // Log all tried paths for debugging
+  console.error("[AXIOM] Could not find index.html. Tried:", candidates);
+  return candidates[0]; // fallback
+}
+
 app.whenReady().then(() => {
   const DATA_DIR =
     process.env.NODE_ENV === "development"
       ? path.join(app.getAppPath(), "..", "data")
       : path.join(app.getPath("userData"), "data");
 
-  getDB(DATA_DIR);
+  console.log("[AXIOM] DATA_DIR:", DATA_DIR);
 
-  // Set dock/taskbar icon (macOS needs this separately in dev mode)
-  const iconPath = path.join(app.getAppPath(), "assets", "icons", "icon.png");
-  console.log("[icon] looking for icon at:", iconPath);
-  try {
-    if (process.platform === "darwin" && app.dock) {
-      app.dock.setIcon(iconPath);
-    }
-  } catch (e) {
-    console.warn("Could not set dock icon:", e);
-  }
+  getDB(DATA_DIR);
 
   registerAuthHandlers(DATA_DIR);
   registerNotesHandlers(DATA_DIR);
@@ -41,7 +56,6 @@ app.whenReady().then(() => {
   registerSnapshotHandlers(DATA_DIR, () => store.key);
   registerSyncHandlers(DATA_DIR, () => store.key);
 
-  // Escape exits kiosk mode
   globalShortcut.register("Escape", () => {
     if (mainWindow?.isKiosk()) {
       mainWindow.setKiosk(false);
@@ -54,7 +68,6 @@ app.whenReady().then(() => {
     height: 800,
     frame: false,
     titleBarStyle: "hidden",
-    icon: iconPath,
     trafficLightPosition: { x: -100, y: -100 },
     fullscreenable: true,
     transparent: false,
@@ -63,7 +76,7 @@ app.whenReady().then(() => {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
-      devTools: process.env.NODE_ENV === "development", // ← fixed
+      devTools: process.env.NODE_ENV === "development",
     },
   });
 
@@ -80,10 +93,11 @@ app.whenReady().then(() => {
   if (process.env.NODE_ENV === "development") {
     mainWindow.loadURL("http://localhost:5173");
   } else {
-    mainWindow.loadFile(path.join(__dirname, "..", "..", "dist", "index.html"));
+    const indexPath = getIndexPath();
+    mainWindow.loadFile(indexPath).catch((err) => {
+      console.error("[AXIOM] Failed to load:", indexPath, err);
+    });
   }
-
-  // ← REMOVED dom-ready DevTools opener
 
   ipcMain.on("win:minimize", () => mainWindow?.minimize());
   ipcMain.on("win:maximize", () => {
@@ -92,9 +106,7 @@ app.whenReady().then(() => {
     mainWindow.setKiosk(!isKiosk);
     mainWindow.webContents.send("fullscreen-change", !isKiosk);
   });
-  ipcMain.on("win:close", () => {
-    app.quit();
-  });
+  ipcMain.on("win:close", () => app.quit());
 
   globalShortcut.register("CommandOrControl+Shift+L", () => {
     store.clearSession();
@@ -108,5 +120,5 @@ app.on("before-quit", () => {
 });
 
 app.on("window-all-closed", () => {
-  app.quit(); // quit on all platforms including mac
+  app.quit();
 });
