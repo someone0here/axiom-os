@@ -12,7 +12,7 @@ export function Desktop() {
 
   return (
     <div
-      className="fixed inset-0 flex flex-col overflow-hidden"
+      className="fixed inset-0 flex min-h-0 max-h-[100dvh] flex-col overflow-hidden"
       style={{ background: wallpapers[wallpaperIndex] }}
     >
       {/* AXIOM watermark */}
@@ -61,7 +61,7 @@ export function Desktop() {
       </div>
 
       <Taskbar />
-      <div className="flex-1 relative overflow-hidden">
+      <div className="relative min-h-0 flex-1 overflow-hidden">
         <WindowManager />
       </div>
       <Dock />

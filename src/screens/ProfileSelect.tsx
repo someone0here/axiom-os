@@ -20,7 +20,7 @@ export function ProfileSelect({
 
   return (
     <motion.div
-      className="fixed inset-0 bg-[#040409] flex flex-col items-center justify-center"
+      className="fixed inset-0 flex flex-col items-center justify-center overflow-y-auto bg-[#040409] py-8"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
@@ -29,15 +29,15 @@ export function ProfileSelect({
         <span className="text-cyan-400">AX</span>
         <span className="text-purple-500">IOM</span>
       </div>
-      <p className="text-[9px] text-slate-700 tracking-widest uppercase mb-10">
+      <p className="mb-6 text-[9px] uppercase tracking-widest text-slate-700 sm:mb-10">
         Select Profile
       </p>
-      <div className="flex gap-4 flex-wrap justify-center px-8">
+      <div className="flex max-h-[55vh] flex-wrap justify-center gap-3 overflow-y-auto px-4 sm:gap-4 sm:px-8">
         {profiles.map((p) => (
           <button
             key={p.id}
             onClick={() => onSelect(p.id)}
-            className="flex flex-col items-center gap-3 p-6 rounded-2xl bg-white/[0.04] border border-white/[0.08] hover:bg-white/[0.07] hover:border-white/[0.15] transition-all w-32"
+            className="flex w-28 flex-shrink-0 flex-col items-center gap-2 rounded-2xl border border-white/[0.08] bg-white/[0.04] p-4 transition-all hover:border-white/[0.15] hover:bg-white/[0.07] sm:w-32 sm:gap-3 sm:p-6"
           >
             <div className="w-14 h-14 rounded-full bg-cyan-500/15 border border-cyan-500/25 flex items-center justify-center text-2xl">
               {p.isDecoy ? "🎭" : "◈"}
@@ -47,7 +47,7 @@ export function ProfileSelect({
         ))}
         <button
           onClick={() => onSelect(0)}
-          className="flex flex-col items-center gap-3 p-6 rounded-2xl border border-dashed border-white/[0.07] hover:border-cyan-500/30 transition-all w-32"
+          className="flex w-28 flex-shrink-0 flex-col items-center gap-2 rounded-2xl border border-dashed border-white/[0.07] p-4 transition-all hover:border-cyan-500/30 sm:w-32 sm:gap-3 sm:p-6"
         >
           <div className="w-14 h-14 rounded-full border border-dashed border-white/15 flex items-center justify-center text-white/20 text-xl">
             +

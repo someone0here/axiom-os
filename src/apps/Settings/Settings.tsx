@@ -310,19 +310,21 @@ export default function Settings() {
   };
 
   return (
-    <div className="flex h-full">
-      <div className="w-40 border-r border-white/[0.05] flex flex-col py-2 flex-shrink-0 overflow-y-auto">
+    <div className="flex h-full min-h-0 flex-col md:flex-row">
+      <div className="flex shrink-0 flex-row gap-0.5 overflow-x-auto border-b border-white/[0.05] py-1.5 md:w-40 md:flex-col md:gap-0 md:border-b-0 md:border-r md:py-2 md:overflow-y-auto">
         {TABS.map((t) => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
-            className={`text-left px-4 py-2.5 text-[11px] transition-colors ${tab === t.id ? "text-cyan-400 bg-cyan-500/[0.07]" : "text-slate-500 hover:text-slate-300 hover:bg-white/[0.03]"}`}
+            className={`shrink-0 whitespace-nowrap rounded-lg px-3 py-2 text-left text-[10px] transition-colors sm:text-[11px] md:w-full md:rounded-none md:px-4 md:py-2.5 ${tab === t.id ? "text-cyan-400 bg-cyan-500/[0.07]" : "text-slate-500 hover:bg-white/[0.03] hover:text-slate-300"}`}
           >
             {t.label}
           </button>
         ))}
       </div>
-      <div className="flex-1 p-5 overflow-y-auto">{content[tab]}</div>
+      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3 sm:p-5">
+        {content[tab]}
+      </div>
     </div>
   );
 }

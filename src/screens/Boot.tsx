@@ -59,7 +59,7 @@ export function Boot({ onComplete }: { onComplete: () => void }) {
       </motion.h1>
 
       {/* Progress bar */}
-      <div className="mt-8 w-56 h-[2px] bg-white/5 rounded-full overflow-hidden">
+      <div className="mx-8 mt-8 h-[2px] w-full max-w-xs overflow-hidden rounded-full bg-white/5">
         <motion.div
           className="h-full bg-gradient-to-r from-cyan-400 to-purple-500 rounded-full"
           animate={{ width: `${progress}%` }}

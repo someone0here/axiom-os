@@ -51,7 +51,7 @@ export function Onboarding({ onComplete }: Props) {
 
   return (
     <motion.div
-      className="fixed inset-0 bg-[#040409] flex flex-col items-center justify-center"
+      className="fixed inset-0 flex flex-col items-center justify-center overflow-y-auto bg-[#040409] px-4 py-10"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
@@ -80,7 +80,7 @@ export function Onboarding({ onComplete }: Props) {
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: -20, scale: 0.97 }}
           transition={{ duration: 0.25 }}
-          className={`w-80 p-8 rounded-2xl bg-gradient-to-b ${current.color} border ${current.border} flex flex-col items-center gap-5 text-center`}
+          className={`w-full max-w-sm px-5 py-6 sm:p-8 rounded-2xl bg-gradient-to-b ${current.color} border ${current.border} flex flex-col items-center gap-5 text-center mx-4`}
         >
           {/* Icon */}
           <div className="text-5xl">{current.icon}</div>

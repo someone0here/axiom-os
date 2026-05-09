@@ -56,8 +56,8 @@ export default function Vault() {
     );
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.05]">
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-2 border-b border-white/[0.05] px-3 py-3 sm:px-4">
         <span className="text-[9px] text-slate-500 uppercase tracking-widest font-bold">
           🔐 Password Vault
         </span>
@@ -96,7 +96,7 @@ export default function Vault() {
           </div>
         </div>
       )}
-      <div className="flex-1 overflow-y-auto px-4 py-2 flex flex-col gap-2">
+      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-3 py-2 sm:px-4">
         {entries.map((e) => (
           <div
             key={e.id}
@@ -106,7 +106,7 @@ export default function Vault() {
               {e.site}
             </div>
             <div className="text-[9px] text-slate-600">{e.username}</div>
-            <div className="flex items-center gap-2 mt-2">
+            <div className="mt-2 flex flex-wrap items-center gap-2">
               <code className="flex-1 text-[10px] text-purple-400 font-mono truncate">
                 {visible.has(e.id) ? e.password : "••••••••••••"}
               </code>

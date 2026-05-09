@@ -40,7 +40,7 @@ const AppWindow = memo(({ win }: { win: AppWindow }) => {
 export function WindowManager() {
   const { windows } = useDesktop();
   return (
-    <div className="absolute inset-0">
+    <div className="absolute inset-0 min-h-0 min-w-0">
       <AnimatePresence>
         {windows.map((win) => (
           <AppWindow key={win.id} win={win} />

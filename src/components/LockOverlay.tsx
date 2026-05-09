@@ -32,7 +32,7 @@ export function LockOverlay() {
       <p className="text-[9px] text-slate-700 tracking-widest uppercase mb-8">
         Screen Locked
       </p>
-      <div className="w-64 flex flex-col gap-3">
+      <div className="flex w-full max-w-xs flex-col gap-3 px-4">
         <input
           type="password"
           placeholder="Enter password"

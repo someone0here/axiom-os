@@ -1,56 +1,49 @@
-import { useState, useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  finalizeEvent,
   generateSecretKey,
   getPublicKey,
-  finalizeEvent,
   nip04,
   nip19,
   SimplePool,
-  type Event,
 } from "nostr-tools";
+import type { Filter } from "nostr-tools";
 
-const RELAYS = [
+type ChatMessage = {
+  id: string;
+  content: string;
+  created_at: number;
+  pubkey: string;
+};
+
+type ChatMode = "world" | "dm";
+type DMContact = {
+  id: string;
+  name: string;
+  pubkey: string;
+};
+
+const DEFAULT_RELAYS = [
   "wss://relay.damus.io",
-  "wss://nos.lol",
   "wss://relay.primal.net",
-  "wss://relay.nostr.band",
-  "wss://offchain.pub",
-  "wss://nostr.mom",
+  "wss://nos.lol",
 ];
 
-interface Message {
-  id: string;
-  from: string;
-  to: string;
-  content: string;
-  timestamp: number;
-  sent: boolean;
+const MAX_LEN = 400;
+const SESSION_KEY = "axiom-anon-chat-sk";
+const CONTACTS_KEY = "axiom-anon-chat-contacts";
+
+function toRoomTag(raw: string): string {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-_]/g, "-")
+    .replace(/-+/g, "-")
+    .slice(0, 32) || "lobby";
 }
 
-interface Contact {
-  npub: string;
-  hexPub: string;
-  nickname: string;
-  lastMessage?: string;
-  lastTime?: number;
-  unread: number;
-}
-
-interface Identity {
-  nsec: string;
-  npub: string;
-  hexPriv: string;
-  hexPub: string;
-}
-
-function npubToHex(npub: string): string | null {
-  try {
-    const decoded = nip19.decode(npub);
-    if (decoded.type === "npub") return decoded.data as string;
-    return null;
-  } catch {
-    return null;
-  }
+function makeAnonLabel(pubkey: string): string {
+  return `anon-${pubkey.slice(0, 6)}`;
 }
 
 function bytesToHex(bytes: Uint8Array): string {
@@ -59,625 +52,602 @@ function bytesToHex(bytes: Uint8Array): string {
     .join("");
 }
 
-export default function Chat() {
-  const [identity, setIdentity] = useState<Identity | null>(null);
-  const [contacts, setContacts] = useState<Contact[]>([]);
-  const [activeContact, setActiveContact] = useState<Contact | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState("");
-  const [status, setStatus] = useState<"connecting" | "connected" | "error">(
-    "connecting",
-  );
-  const [view, setView] = useState<"setup" | "chat">("setup");
-  const [addingContact, setAddingContact] = useState(false);
-  const [newContactNpub, setNewContactNpub] = useState("");
-  const [newContactName, setNewContactName] = useState("");
-  const [addError, setAddError] = useState("");
-  const [copied, setCopied] = useState(false);
-  const [sending, setSending] = useState(false);
+function parseNostrPubkey(value: string): string | null {
+  const input = value.trim();
+  if (!input) return null;
+  if (/^[a-f0-9]{64}$/i.test(input)) return input.toLowerCase();
+  if (!input.startsWith("npub")) return null;
+  try {
+    const decoded = nip19.decode(input);
+    if (decoded.type === "npub") {
+      const hex = String(decoded.data).toLowerCase();
+      return /^[a-f0-9]{64}$/.test(hex) ? hex : null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
 
-  const poolRef = useRef<SimplePool | null>(null);
-  const identityRef = useRef<Identity | null>(null);
-  const messagesEnd = useRef<HTMLDivElement>(null);
-  const allMessages = useRef<Map<string, Message[]>>(new Map());
+function isValidPubkey(pubkey: string | null): pubkey is string {
+  return typeof pubkey === "string" && /^[a-f0-9]{64}$/i.test(pubkey);
+}
 
-  useEffect(() => {
-    messagesEnd.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  useEffect(() => {
-    initIdentity();
-  }, []);
-
-  const initIdentity = async () => {
-    const stored = await window.axiom.settingsGet("chat_identity");
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored);
-        identityRef.current = parsed;
-        setIdentity(parsed);
-        const storedContacts = await window.axiom.settingsGet("chat_contacts");
-        if (storedContacts) setContacts(JSON.parse(storedContacts));
-        setView("chat");
-        return;
-      } catch {
-        /* corrupt, regenerate */
+function readOrCreateSecretKey(): Uint8Array {
+  try {
+    const existing = sessionStorage.getItem(SESSION_KEY);
+    if (existing) {
+      const arr = JSON.parse(existing);
+      if (Array.isArray(arr)) {
+        return Uint8Array.from(arr);
       }
     }
-    setView("setup");
-  };
+  } catch {
+    // if session storage parsing fails, create a fresh key
+  }
 
-  const generateIdentity = async () => {
-    const privKeyBytes = generateSecretKey();
-    const hexPriv = bytesToHex(privKeyBytes);
-    const hexPub = getPublicKey(privKeyBytes);
-    const npub = nip19.npubEncode(hexPub);
-    const nsec = nip19.nsecEncode(privKeyBytes);
-    const id: Identity = { nsec, npub, hexPriv, hexPub };
-    await window.axiom.settingsSet("chat_identity", JSON.stringify(id));
-    identityRef.current = id;
-    setIdentity(id);
-    setView("chat");
-  };
+  const sk = generateSecretKey();
+  sessionStorage.setItem(SESSION_KEY, JSON.stringify(Array.from(sk)));
+  return sk;
+}
 
-  // Connect to relays and subscribe to incoming DMs
+function uniqueById(messages: ChatMessage[]): ChatMessage[] {
+  const seen = new Set<string>();
+  const out: ChatMessage[] = [];
+  for (const m of messages) {
+    if (!seen.has(m.id)) {
+      seen.add(m.id);
+      out.push(m);
+    }
+  }
+  return out.sort((a, b) => a.created_at - b.created_at);
+}
+
+function readContacts(): DMContact[] {
+  try {
+    const raw = localStorage.getItem(CONTACTS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(
+        (item): item is DMContact =>
+          item &&
+          typeof item.id === "string" &&
+          typeof item.name === "string" &&
+          typeof item.pubkey === "string" &&
+          /^[a-f0-9]{64}$/i.test(item.pubkey),
+      )
+      .map((c) => ({ ...c, pubkey: c.pubkey.toLowerCase() }));
+  } catch {
+    return [];
+  }
+}
+
+function writeContacts(contacts: DMContact[]) {
+  localStorage.setItem(CONTACTS_KEY, JSON.stringify(contacts));
+}
+
+export default function Chat() {
+  const [mode, setMode] = useState<ChatMode>("world");
+  const [roomInput, setRoomInput] = useState("lobby");
+  const [room, setRoom] = useState("lobby");
+  const [peerInput, setPeerInput] = useState("");
+  const [peerPubkey, setPeerPubkey] = useState<string | null>(null);
+  const [contacts, setContacts] = useState<DMContact[]>([]);
+  const [contactNameInput, setContactNameInput] = useState("");
+  const [contactKeyInput, setContactKeyInput] = useState("");
+  const [relayInput, setRelayInput] = useState(DEFAULT_RELAYS.join(", "));
+  const [draft, setDraft] = useState("");
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [status, setStatus] = useState("Disconnected");
+  const [isSending, setIsSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
+
+  const relays = useMemo(
+    () =>
+      relayInput
+        .split(",")
+        .map((r) => r.trim())
+        .filter(Boolean)
+        .filter((r) => r.startsWith("wss://")),
+    [relayInput],
+  );
+
+  const skRef = useRef<Uint8Array>(readOrCreateSecretKey());
+  const pkRef = useRef<string>(getPublicKey(skRef.current));
+  const skHexRef = useRef<string>(bytesToHex(skRef.current));
+  const myNpub = useMemo(() => nip19.npubEncode(pkRef.current), []);
+  const poolRef = useRef<SimplePool | null>(null);
+  const subCloseRef = useRef<Array<{ close: (reason?: string) => void }>>([]);
+
   useEffect(() => {
-    if (!identity || view !== "chat") return;
+    setContacts(readContacts());
+  }, []);
+
+  useEffect(() => {
+    listRef.current?.scrollTo({
+      top: listRef.current.scrollHeight,
+      behavior: "smooth",
+    });
+  }, [messages.length]);
+
+  useEffect(() => {
+    setMessages([]);
+    setError(null);
+
+    if (!relays.length) {
+      setStatus("No valid relays. Use wss:// URLs.");
+      return;
+    }
+
+    if (mode === "dm" && !isValidPubkey(peerPubkey)) {
+      setStatus("Set peer npub/hex pubkey to start DM.");
+      return;
+    }
 
     const pool = new SimplePool();
     poolRef.current = pool;
-    setStatus("connecting");
+    setStatus("Connecting...");
+    subCloseRef.current = [];
 
-    // 7 days — 30 days risks relay rate limits
-    const since = Math.floor(Date.now() / 1000) - 7 * 24 * 60 * 60;
-    const filters = [
-      { kinds: [4], "#p": [identity.hexPub], since },
-      { kinds: [4], authors: [identity.hexPub], since },
-    ] as any;
-
-    const sub = pool.subscribeMany(RELAYS, filters, {
-      onevent: (event: Event) => {
-        const id = identityRef.current;
-        if (!id) return;
-        handleIncomingEvent(event, id);
-        setStatus("connected");
-      },
-      oneose: () => {
-        setStatus("connected");
-      },
-    });
-
-    return () => {
-      sub.close();
-      pool.close(RELAYS);
-    };
-  }, [identity, view]);
-
-  const handleIncomingEvent = async (event: Event, id: Identity) => {
-    try {
-      const isSent = event.pubkey === id.hexPub;
-      const otherHex = isSent
-        ? event.tags.find((t) => t[0] === "p")?.[1]
-        : event.pubkey;
-
-      if (!otherHex) return;
-
-      const decrypted = await nip04.decrypt(
-        id.hexPriv,
-        otherHex,
-        event.content,
-      );
-
-      const msg: Message = {
-        id: event.id,
-        from: event.pubkey,
-        to: otherHex,
-        content: decrypted,
-        timestamp: event.created_at * 1000,
-        sent: isSent,
+    if (mode === "world") {
+      const tag = toRoomTag(room);
+      const filter: Filter = {
+        kinds: [1],
+        "#t": [`axiom-${tag}`],
+        limit: 120,
       };
 
-      const contactKey = otherHex;
-      const existing = allMessages.current.get(contactKey) || [];
-
-      // Deduplicate
-      if (existing.find((m) => m.id === msg.id)) return;
-
-      const updated = [...existing, msg].sort(
-        (a, b) => a.timestamp - b.timestamp,
-      );
-      allMessages.current.set(contactKey, updated);
-
-      setContacts((prev) =>
-        prev.map((c) =>
-          c.hexPub === contactKey
-            ? {
-                ...c,
-                lastMessage: decrypted.slice(0, 40),
-                lastTime: msg.timestamp,
-                unread: isSent ? c.unread : c.unread + 1,
-              }
-            : c,
-        ),
-      );
-
-      // Update messages if this contact is currently open
-      setActiveContact((prev) => {
-        if (prev?.hexPub === contactKey) {
-          setMessages([...updated]);
-        }
-        return prev;
-      });
-    } catch {
-      // Decryption failure expected for messages from unknown contacts
-    }
-  };
-
-  const sendMessage = async () => {
-    if (!input.trim() || !activeContact || !identity || sending) return;
-    if (!poolRef.current) {
-      alert("Not connected to relays. Please wait.");
-      return;
-    }
-
-    setSending(true);
-    const text = input.trim();
-    setInput("");
-
-    // Build the event first
-    let event: ReturnType<typeof finalizeEvent>;
-    try {
-      const encrypted = await nip04.encrypt(
-        identity.hexPriv,
-        activeContact.hexPub,
-        text,
-      );
-
-      const privBytes = new Uint8Array(
-        identity.hexPriv.match(/.{1,2}/g)!.map((b) => parseInt(b, 16)),
-      );
-
-      event = finalizeEvent(
-        {
-          kind: 4,
-          created_at: Math.floor(Date.now() / 1000),
-          tags: [["p", activeContact.hexPub]],
-          content: encrypted,
+      const close = pool.subscribeMany(relays, filter, {
+        onevent(event) {
+          if (
+            !event?.id ||
+            !event?.pubkey ||
+            typeof event.content !== "string"
+          ) {
+            return;
+          }
+          setMessages((prev) =>
+            uniqueById([
+              ...prev,
+              {
+                id: event.id,
+                content: event.content,
+                created_at: event.created_at ?? Math.floor(Date.now() / 1000),
+                pubkey: event.pubkey,
+              },
+            ]),
+          );
         },
-        privBytes,
-      );
-    } catch (err) {
-      console.error("[chat] Failed to build event:", err);
-      setInput(text);
-      setSending(false);
-      alert("Failed to encrypt message.");
+        oneose() {
+          setStatus(`Live in #${tag}`);
+        },
+        onclose(reason) {
+          if (reason) setStatus("Disconnected");
+        },
+      });
+
+      subCloseRef.current.push(close);
+    } else if (isValidPubkey(peerPubkey)) {
+      const incomingFilter: Filter = {
+        kinds: [4],
+        authors: [peerPubkey],
+        "#p": [pkRef.current],
+        limit: 120,
+      };
+      const outgoingFilter: Filter = {
+        kinds: [4],
+        authors: [pkRef.current],
+        "#p": [peerPubkey],
+        limit: 120,
+      };
+
+      const handleDMEvent = async (event: {
+        id: string;
+        pubkey: string;
+        content: string;
+        created_at?: number;
+      }) => {
+        if (!event?.id || !event?.pubkey || typeof event.content !== "string") {
+          return;
+        }
+        try {
+          const otherPubkey =
+            event.pubkey === pkRef.current ? peerPubkey : event.pubkey;
+          const plaintext = await nip04.decrypt(
+            skHexRef.current,
+            otherPubkey,
+            event.content,
+          );
+          setMessages((prev) =>
+            uniqueById([
+              ...prev,
+              {
+                id: event.id,
+                content: plaintext,
+                created_at: event.created_at ?? Math.floor(Date.now() / 1000),
+                pubkey: event.pubkey,
+              },
+            ]),
+          );
+        } catch {
+          // ignore undecryptable events
+        }
+      };
+
+      const inClose = pool.subscribeMany(relays, incomingFilter, {
+        onevent(event) {
+          void handleDMEvent(event);
+        },
+        oneose() {
+          setStatus(`Secure DM with ${makeAnonLabel(peerPubkey)}`);
+        },
+        onclose(reason) {
+          if (reason) setStatus("Disconnected");
+        },
+      });
+
+      const outClose = pool.subscribeMany(relays, outgoingFilter, {
+        onevent(event) {
+          void handleDMEvent(event);
+        },
+      });
+
+      subCloseRef.current.push(inClose, outClose);
+    }
+
+    return () => {
+      try {
+        subCloseRef.current.forEach((s) => s.close());
+      } catch {
+        // best effort cleanup
+      }
+      subCloseRef.current = [];
+      pool.close(relays);
+      poolRef.current = null;
+      setStatus("Disconnected");
+    };
+  }, [mode, room, peerPubkey, relays]);
+
+  const send = async () => {
+    const content = draft.trim();
+    if (!content) return;
+    if (!poolRef.current || !relays.length) {
+      setError("No active relay connection.");
       return;
     }
+    setError(null);
+    setIsSending(true);
 
-    // Add to local state IMMEDIATELY (optimistic)
-    const msg: Message = {
-      id: event.id,
-      from: identity.hexPub,
-      to: activeContact.hexPub,
-      content: text,
-      timestamp: event.created_at * 1000,
-      sent: true,
-    };
-
-    const existing = allMessages.current.get(activeContact.hexPub) || [];
-    if (!existing.find((m) => m.id === msg.id)) {
-      const updated = [...existing, msg];
-      allMessages.current.set(activeContact.hexPub, updated);
-      setMessages(updated);
-      setContacts((prev) =>
-        prev.map((c) =>
-          c.hexPub === activeContact.hexPub
-            ? { ...c, lastMessage: text.slice(0, 40), lastTime: msg.timestamp }
-            : c,
-        ),
-      );
-    }
-
-    // Publish in background — don't block UI
     try {
-      const publishResults = poolRef.current.publish(RELAYS, event);
-      await Promise.race([
-        Promise.any(publishResults),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("timeout")), 10000),
-        ),
-      ]);
-      console.log("[chat] Published:", event.id);
-    } catch (err) {
-      console.error("[chat] Publish failed:", err);
-      // Keep message in UI but mark with warning
-      setContacts((prev) =>
-        prev.map((c) =>
-          c.hexPub === activeContact.hexPub
-            ? { ...c, lastMessage: "⚠️ " + text.slice(0, 35) }
-            : c,
-        ),
+      const now = Math.floor(Date.now() / 1000);
+      const isDM = mode === "dm";
+      const payload = content.slice(0, MAX_LEN);
+      let outgoingContent = payload;
+      let eventTags: string[][] = [
+        ["client", "axiom-os-anonymous-world-chat"],
+      ];
+      let kind = 1;
+
+      if (isDM) {
+        if (!isValidPubkey(peerPubkey)) {
+          throw new Error("Peer public key is required for DM mode.");
+        }
+        outgoingContent = await nip04.encrypt(skHexRef.current, peerPubkey, payload);
+        eventTags = [
+          ["p", peerPubkey],
+          ["client", "axiom-os-anonymous-dm"],
+        ];
+        kind = 4;
+      } else {
+        eventTags = [
+          ["t", `axiom-${toRoomTag(room)}`],
+          ["client", "axiom-os-anonymous-world-chat"],
+        ];
+      }
+
+      const event = finalizeEvent(
+        {
+          kind,
+          created_at: now,
+          tags: eventTags,
+          content: outgoingContent,
+        },
+        skRef.current,
       );
-    }
 
-    setSending(false);
+      setMessages((prev) =>
+        uniqueById([
+          ...prev,
+          {
+            id: event.id,
+            content: payload,
+            created_at: event.created_at,
+            pubkey: event.pubkey,
+          },
+        ]),
+      );
+
+      poolRef.current.publish(relays, event);
+      setDraft("");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to publish.";
+      if (message.includes("fill") || message.includes("point")) {
+        setError(
+          "Peer key is invalid for Nostr DM encryption. Use full npub or 64-char hex pubkey.",
+        );
+      } else {
+        setError(message);
+      }
+    } finally {
+      setIsSending(false);
+    }
   };
 
-  const addContact = async () => {
-    setAddError("");
-    const hex = npubToHex(newContactNpub.trim());
-    if (!hex) {
-      setAddError("Invalid AXIOM ID. Must start with npub1...");
+  const addContact = () => {
+    const parsed = parseNostrPubkey(contactKeyInput);
+    const name = contactNameInput.trim();
+    if (!name) {
+      setError("Contact name is required.");
       return;
     }
-    if (hex === identity?.hexPub) {
-      setAddError("That's your own ID!");
-      return;
-    }
-    if (contacts.find((c) => c.hexPub === hex)) {
-      setAddError("Contact already added.");
+    if (!parsed) {
+      setError("Invalid contact key. Use npub... or 64-char hex pubkey.");
       return;
     }
 
-    const contact: Contact = {
-      npub: newContactNpub.trim(),
-      hexPub: hex,
-      nickname: newContactName.trim() || `User ${contacts.length + 1}`,
-      unread: 0,
+    const next: DMContact = {
+      id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+      name: name.slice(0, 32),
+      pubkey: parsed,
     };
-
-    const updated = [...contacts, contact];
+    const updated = [next, ...contacts.filter((c) => c.pubkey !== parsed)];
     setContacts(updated);
-    await window.axiom.settingsSet("chat_contacts", JSON.stringify(updated));
-    setNewContactNpub("");
-    setNewContactName("");
-    setAddingContact(false);
-    selectContact(contact);
+    writeContacts(updated);
+    setPeerPubkey(parsed);
+    setPeerInput(parsed);
+    setContactNameInput("");
+    setContactKeyInput("");
+    setError(null);
   };
 
-  const selectContact = (contact: Contact) => {
-    setActiveContact(contact);
-    const msgs = allMessages.current.get(contact.hexPub) || [];
-    setMessages([...msgs]);
-    setContacts((prev) =>
-      prev.map((c) => (c.hexPub === contact.hexPub ? { ...c, unread: 0 } : c)),
-    );
+  const useContact = (contact: DMContact) => {
+    if (!isValidPubkey(contact.pubkey)) {
+      setError("Saved contact key is invalid. Please remove and add again.");
+      return;
+    }
+    setPeerPubkey(contact.pubkey);
+    setPeerInput(contact.pubkey);
+    setError(null);
   };
 
-  const copyId = () => {
-    navigator.clipboard.writeText(identity?.npub || "");
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const removeContact = (id: string) => {
+    const removed = contacts.find((c) => c.id === id);
+    const updated = contacts.filter((c) => c.id !== id);
+    setContacts(updated);
+    writeContacts(updated);
+    if (removed && peerPubkey === removed.pubkey) {
+      setPeerPubkey(null);
+      setPeerInput("");
+      setMessages([]);
+    }
   };
 
-  const formatTime = (ts: number) => {
-    const d = new Date(ts);
-    const now = new Date();
-    const isToday = d.toDateString() === now.toDateString();
-    return isToday
-      ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-      : d.toLocaleDateString([], { month: "short", day: "numeric" });
-  };
-
-  // Setup screen
-  if (view === "setup") {
-    return (
-      <div className="flex flex-col items-center justify-center h-full gap-6 px-8">
-        <div className="text-4xl">🔐</div>
-        <div className="text-center">
-          <h2 className="text-sm font-semibold text-slate-200 mb-1">
-            AXIOM Chat
-          </h2>
-          <p className="text-[10px] text-slate-600 leading-relaxed max-w-xs">
-            Anonymous encrypted messaging powered by Nostr. No email, no phone
-            number — just a unique cryptographic ID. Messages are end-to-end
-            encrypted. Relays never see your content.
-          </p>
-        </div>
-        <div className="w-full max-w-xs bg-white/[0.03] border border-white/[0.07] rounded-2xl p-5 flex flex-col gap-3">
-          <div className="text-[9px] text-slate-600 uppercase tracking-widest text-center">
-            What happens when you click below
-          </div>
-          {[
-            ["🔑", "A unique keypair is generated on your device"],
-            ["🔒", "Your private key is stored in AXIOM's encrypted vault"],
-            ["📡", "Your public key becomes your AXIOM Chat ID"],
-            ["💬", "Messages encrypted before leaving your device"],
-          ].map(([icon, text]) => (
-            <div key={text} className="flex items-start gap-3">
-              <span className="text-base flex-shrink-0">{icon}</span>
-              <span className="text-[10px] text-slate-500 leading-relaxed">
-                {text}
-              </span>
-            </div>
-          ))}
-        </div>
-        <button
-          onClick={generateIdentity}
-          className="px-8 py-3 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 text-xs font-bold tracking-widest uppercase hover:bg-cyan-500/20 transition-all"
-        >
-          Generate My AXIOM ID
-        </button>
-      </div>
-    );
-  }
+  const activeContact = contacts.find((c) => c.pubkey === peerPubkey) || null;
 
   return (
-    <div className="flex h-full">
-      {/* Sidebar */}
-      <div className="w-52 border-r border-white/[0.05] flex flex-col flex-shrink-0">
-        {/* My ID */}
-        <div className="p-3 border-b border-white/[0.05]">
-          <div className="text-[8px] text-slate-700 uppercase tracking-widest mb-1.5">
-            Your AXIOM ID
-          </div>
-          <div className="flex items-center gap-1.5">
-            <code className="text-[8px] text-cyan-500 font-mono truncate flex-1 bg-cyan-500/5 px-2 py-1 rounded">
-              {identity?.npub.slice(0, 20)}...
-            </code>
-            <button
-              onClick={copyId}
-              className="text-[8px] text-slate-600 hover:text-cyan-400 transition-colors flex-shrink-0 px-1.5 py-1 border border-white/[0.07] rounded"
-            >
-              {copied ? "✓" : "Copy"}
-            </button>
-          </div>
-          <div className="flex items-center gap-1.5 mt-2">
-            <div
-              className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-                status === "connected"
-                  ? "bg-green-400"
-                  : status === "connecting"
-                    ? "bg-yellow-400 animate-pulse"
-                    : "bg-red-400"
-              }`}
-            />
-            <span className="text-[8px] text-slate-700">
-              {status === "connected"
-                ? "Connected to relays"
-                : status === "connecting"
-                  ? "Connecting..."
-                  : "Connection error"}
-            </span>
-          </div>
-        </div>
-
-        {/* Contacts */}
-        <div className="flex items-center justify-between px-3 py-2 border-b border-white/[0.04]">
-          <span className="text-[8px] text-slate-700 uppercase tracking-widest font-bold">
-            Contacts
+    <div className="flex h-full min-h-0 flex-col text-slate-300">
+      <div className="flex-shrink-0 border-b border-white/[0.05] px-2 py-2 sm:px-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[9px] uppercase tracking-widest text-slate-500">
+            Anonymous Nostr Chat
           </span>
+          <span className="rounded bg-cyan-500/10 px-2 py-0.5 text-[9px] text-cyan-300">
+            {status}
+          </span>
+          <span className="ml-auto text-[9px] text-slate-600">
+            you: {makeAnonLabel(pkRef.current)}
+          </span>
+        </div>
+        <div className="mt-2 flex gap-2">
           <button
-            onClick={() => setAddingContact(true)}
-            className="text-cyan-400 text-base leading-none hover:text-cyan-300 transition-colors"
+            onClick={() => setMode("world")}
+            className={`rounded px-2.5 py-1 text-[10px] ${
+              mode === "world"
+                ? "bg-cyan-500/20 text-cyan-200"
+                : "bg-white/[0.04] text-slate-400"
+            }`}
           >
-            +
+            World Chat
+          </button>
+          <button
+            onClick={() => setMode("dm")}
+            className={`rounded px-2.5 py-1 text-[10px] ${
+              mode === "dm"
+                ? "bg-cyan-500/20 text-cyan-200"
+                : "bg-white/[0.04] text-slate-400"
+            }`}
+          >
+            1:1 Anonymous DM
           </button>
         </div>
-
-        <div className="flex-1 overflow-y-auto">
-          {contacts.length === 0 ? (
-            <div className="px-3 py-6 text-center">
-              <p className="text-[9px] text-slate-700 leading-relaxed">
-                No contacts yet. Add a contact using their AXIOM ID (npub1...).
-              </p>
-            </div>
+        <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2">
+          {mode === "world" ? (
+            <input
+              value={roomInput}
+              onChange={(e) => setRoomInput(e.target.value)}
+              onBlur={() => setRoom(toRoomTag(roomInput))}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") setRoom(toRoomTag(roomInput));
+              }}
+              className="rounded border border-white/[0.08] bg-white/[0.03] px-2 py-1 text-[11px] outline-none focus:border-cyan-500/60"
+              placeholder="Room (e.g. lobby)"
+            />
           ) : (
-            contacts.map((c) => (
-              <div
-                key={c.hexPub}
-                onClick={() => selectContact(c)}
-                className={`px-3 py-2.5 cursor-pointer border-b border-white/[0.03] transition-colors ${
-                  activeContact?.hexPub === c.hexPub
-                    ? "bg-cyan-500/[0.07] border-l-2 border-l-cyan-500"
-                    : "hover:bg-white/[0.03]"
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-medium text-slate-300 truncate">
-                    {c.nickname}
-                  </span>
-                  {c.unread > 0 && (
-                    <span className="text-[8px] bg-cyan-500 text-black font-bold px-1.5 py-0.5 rounded-full flex-shrink-0">
-                      {c.unread}
-                    </span>
-                  )}
-                </div>
-                {c.lastMessage && (
-                  <div className="text-[8px] text-slate-700 truncate mt-0.5">
-                    {c.lastMessage}
-                  </div>
-                )}
-                {c.lastTime && (
-                  <div className="text-[7px] text-slate-800 mt-0.5">
-                    {formatTime(c.lastTime)}
-                  </div>
-                )}
-              </div>
-            ))
+            <input
+              value={peerInput}
+              onChange={(e) => setPeerInput(e.target.value)}
+              onBlur={() => {
+                const parsed = parseNostrPubkey(peerInput);
+                setPeerPubkey(parsed);
+                if (!parsed && peerInput.trim()) {
+                  setError("Invalid peer key. Use npub... or 64-char hex pubkey.");
+                } else {
+                  setError(null);
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  const parsed = parseNostrPubkey(peerInput);
+                  setPeerPubkey(parsed);
+                  if (!parsed && peerInput.trim()) {
+                    setError(
+                      "Invalid peer key. Use npub... or 64-char hex pubkey.",
+                    );
+                  } else {
+                    setError(null);
+                  }
+                }
+              }}
+              className="rounded border border-white/[0.08] bg-white/[0.03] px-2 py-1 text-[11px] outline-none focus:border-cyan-500/60"
+              placeholder="Peer npub... or hex pubkey"
+            />
           )}
+          <input
+            value={relayInput}
+            onChange={(e) => setRelayInput(e.target.value)}
+            className="rounded border border-white/[0.08] bg-white/[0.03] px-2 py-1 text-[11px] outline-none focus:border-cyan-500/60"
+            placeholder="Relays (comma-separated wss://...)"
+          />
         </div>
-      </div>
-
-      {/* Main chat area */}
-      <div className="flex-1 flex flex-col relative">
-        {/* Add Contact Modal */}
-        {addingContact && (
-          <div className="absolute inset-0 z-50 bg-black/80 flex items-center justify-center">
-            <div className="bg-[#0e0e1e] border border-white/[0.08] rounded-2xl p-6 flex flex-col gap-4 w-80">
-              <div className="text-[11px] font-semibold text-slate-200">
-                Add Contact
+        {mode === "dm" && (
+          <>
+            <div className="mt-2 text-[9px] text-slate-600">
+              Your shareable anonymous ID:{" "}
+              <span className="text-slate-400">{myNpub}</span>
+            </div>
+            <div className="mt-2 rounded border border-white/[0.06] bg-white/[0.02] p-2">
+              <div className="mb-1 text-[9px] uppercase tracking-widest text-slate-500">
+                Contacts
               </div>
-              <div>
-                <label className="text-[9px] text-slate-600 uppercase tracking-widest block mb-1.5">
-                  Their AXIOM ID (npub1...)
-                </label>
+              <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
                 <input
-                  value={newContactNpub}
-                  onChange={(e) => setNewContactNpub(e.target.value)}
-                  placeholder="npub1..."
-                  className="w-full px-3 py-2.5 bg-white/[0.04] border border-white/[0.07] rounded-xl text-slate-200 text-[11px] outline-none focus:border-cyan-500/40 font-mono"
+                  value={contactNameInput}
+                  onChange={(e) => setContactNameInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") addContact();
+                  }}
+                  className="rounded border border-white/[0.08] bg-white/[0.03] px-2 py-1 text-[11px] outline-none focus:border-cyan-500/60"
+                  placeholder="Contact name"
                 />
-              </div>
-              <div>
-                <label className="text-[9px] text-slate-600 uppercase tracking-widest block mb-1.5">
-                  Nickname (optional)
-                </label>
                 <input
-                  value={newContactName}
-                  onChange={(e) => setNewContactName(e.target.value)}
-                  placeholder="e.g. Alice"
-                  onKeyDown={(e) => e.key === "Enter" && addContact()}
-                  className="w-full px-3 py-2.5 bg-white/[0.04] border border-white/[0.07] rounded-xl text-slate-200 text-[11px] outline-none focus:border-cyan-500/40"
+                  value={contactKeyInput}
+                  onChange={(e) => setContactKeyInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") addContact();
+                  }}
+                  className="rounded border border-white/[0.08] bg-white/[0.03] px-2 py-1 text-[11px] outline-none focus:border-cyan-500/60"
+                  placeholder="npub... or hex key"
                 />
-              </div>
-              {addError && (
-                <p className="text-[10px] text-red-400">{addError}</p>
-              )}
-              <div className="flex gap-2">
                 <button
                   onClick={addContact}
-                  className="flex-1 py-2.5 rounded-xl bg-cyan-500/10 border border-cyan-500/25 text-cyan-400 text-[11px] hover:bg-cyan-500/20 transition-all"
+                  className="rounded bg-cyan-500/70 px-3 py-1 text-[11px] text-white"
                 >
                   Add Contact
                 </button>
-                <button
-                  onClick={() => {
-                    setAddingContact(false);
-                    setAddError("");
-                  }}
-                  className="px-4 py-2.5 rounded-xl border border-white/[0.07] text-slate-500 text-[11px]"
-                >
-                  Cancel
-                </button>
               </div>
-            </div>
-          </div>
-        )}
-
-        {!activeContact ? (
-          <div className="flex flex-col items-center justify-center h-full gap-3 text-slate-700">
-            <span className="text-5xl opacity-20">💬</span>
-            <p className="text-[11px]">Select a contact to start chatting</p>
-            <p className="text-[9px] text-slate-800 max-w-xs text-center leading-relaxed">
-              Share your AXIOM ID with friends so they can message you. All
-              messages are end-to-end encrypted.
-            </p>
-            <button
-              onClick={() => setAddingContact(true)}
-              className="mt-2 text-[10px] text-cyan-400 border border-cyan-500/25 px-4 py-2 rounded-lg hover:bg-cyan-500/10"
-            >
-              + Add First Contact
-            </button>
-          </div>
-        ) : (
-          <>
-            {/* Chat header */}
-            <div className="flex items-center gap-3 px-4 py-3 border-b border-white/[0.05] flex-shrink-0">
-              <div className="w-8 h-8 rounded-full bg-purple-500/20 border border-white/10 flex items-center justify-center text-xs font-bold text-purple-300">
-                {activeContact.nickname[0].toUpperCase()}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-[12px] font-medium text-slate-200">
-                  {activeContact.nickname}
-                </div>
-                <div className="text-[8px] text-slate-700 font-mono truncate">
-                  {activeContact.npub}
-                </div>
-              </div>
-              <div
-                className={`w-2 h-2 rounded-full ${
-                  status === "connected"
-                    ? "bg-green-400"
-                    : "bg-yellow-400 animate-pulse"
-                }`}
-              />
-            </div>
-
-            {/* Messages */}
-            <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-2">
-              {messages.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full gap-2 text-slate-800">
-                  <span className="text-3xl opacity-20">🔐</span>
-                  <p className="text-[10px]">No messages yet. Say hello!</p>
-                  <p className="text-[9px] text-center">
-                    All messages are encrypted end-to-end via Nostr NIP-04
-                  </p>
-                </div>
-              ) : (
-                messages.map((msg, i) => {
-                  const prevMsg = messages[i - 1];
-                  const showTime =
-                    !prevMsg ||
-                    msg.timestamp - prevMsg.timestamp > 5 * 60 * 1000;
-
-                  return (
-                    <div key={msg.id}>
-                      {showTime && (
-                        <div className="text-center my-2">
-                          <span className="text-[8px] text-slate-800 bg-white/[0.02] px-3 py-1 rounded-full">
-                            {formatTime(msg.timestamp)}
-                          </span>
-                        </div>
-                      )}
+              {!!contacts.length && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {contacts.map((contact) => {
+                    const selected = activeContact?.id === contact.id;
+                    return (
                       <div
-                        className={`flex ${msg.sent ? "justify-end" : "justify-start"}`}
+                        key={contact.id}
+                        className={`flex items-center gap-1 rounded px-2 py-1 text-[10px] ${
+                          selected
+                            ? "bg-cyan-500/20 text-cyan-100"
+                            : "bg-white/[0.04] text-slate-300"
+                        }`}
                       >
-                        <div
-                          className={`max-w-[72%] px-3 py-2 rounded-2xl text-[11px] leading-relaxed break-words ${
-                            msg.sent
-                              ? "bg-cyan-500/20 border border-cyan-500/20 text-slate-200 rounded-br-sm"
-                              : "bg-white/[0.06] border border-white/[0.07] text-slate-300 rounded-bl-sm"
-                          }`}
+                        <button onClick={() => useContact(contact)}>
+                          {contact.name}
+                        </button>
+                        <button
+                          onClick={() => removeContact(contact.id)}
+                          className="text-slate-500 hover:text-red-300"
+                          title="Remove contact"
                         >
-                          {msg.content}
-                        </div>
+                          x
+                        </button>
                       </div>
-                    </div>
-                  );
-                })
+                    );
+                  })}
+                </div>
               )}
-              <div ref={messagesEnd} />
-            </div>
-
-            {/* Input */}
-            <div className="flex items-center gap-2 px-4 py-3 border-t border-white/[0.05] flex-shrink-0">
-              <input
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    sendMessage();
-                  }
-                }}
-                placeholder={`Message ${activeContact.nickname}...`}
-                disabled={status !== "connected" || sending}
-                className="flex-1 px-4 py-2.5 bg-white/[0.04] border border-white/[0.07] rounded-xl text-slate-200 text-[11px] outline-none focus:border-cyan-500/30 disabled:opacity-40 placeholder:text-slate-700"
-              />
-              <button
-                onClick={sendMessage}
-                disabled={!input.trim() || status !== "connected" || sending}
-                className="w-9 h-9 rounded-xl bg-cyan-500/15 border border-cyan-500/25 text-cyan-400 flex items-center justify-center hover:bg-cyan-500/25 transition-all disabled:opacity-30 flex-shrink-0"
-              >
-                {sending ? (
-                  <span className="text-[8px] animate-pulse">...</span>
-                ) : (
-                  <svg
-                    width="14"
-                    height="14"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.5"
-                  >
-                    <path d="M22 2L11 13M22 2L15 22L11 13L2 9L22 2Z" />
-                  </svg>
-                )}
-              </button>
             </div>
           </>
         )}
+      </div>
+
+      <div
+        ref={listRef}
+        className="min-h-0 flex-1 space-y-2 overflow-y-auto px-2 py-3 sm:px-3"
+      >
+        {messages.map((m) => {
+          const mine = m.pubkey === pkRef.current;
+          return (
+            <div
+              key={m.id}
+              className={`max-w-[92%] rounded px-2 py-1 text-[11px] ${
+                mine
+                  ? "ml-auto bg-cyan-500/20 text-cyan-100"
+                  : "bg-white/[0.05] text-slate-300"
+              }`}
+            >
+              <div className="mb-0.5 text-[9px] text-slate-500">
+                {makeAnonLabel(m.pubkey)} ·{" "}
+                {new Date(m.created_at * 1000).toLocaleTimeString()}
+              </div>
+              <div className="break-words">{m.content}</div>
+            </div>
+          );
+        })}
+        {!messages.length && (
+          <div className="text-[11px] text-slate-600">
+            {mode === "world"
+              ? `No messages yet. Start chatting in #${toRoomTag(room)}.`
+              : "No DM messages yet. Paste peer key and send a message."}
+          </div>
+        )}
+      </div>
+
+      <div className="flex-shrink-0 border-t border-white/[0.05] p-2 sm:p-3">
+        <div className="flex gap-2">
+          <input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void send();
+            }}
+            maxLength={MAX_LEN}
+            className="flex-1 rounded border border-white/[0.08] bg-white/[0.03] px-2 py-1.5 text-[12px] outline-none focus:border-cyan-500/60"
+            placeholder="Write anonymous message..."
+          />
+          <button
+            onClick={() => void send()}
+            disabled={isSending || !draft.trim()}
+            className="rounded bg-cyan-500/80 px-3 py-1.5 text-[11px] font-medium text-white disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Send
+          </button>
+        </div>
+        {error && <div className="mt-1 text-[10px] text-red-300">{error}</div>}
+        <p className="mt-2 text-[9px] text-slate-600">
+          Privacy note: identity is ephemeral. World mode is public-room chat.
+          DM mode encrypts content end-to-end using NIP-04.
+        </p>
       </div>
     </div>
   );

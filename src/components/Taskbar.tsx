@@ -59,7 +59,7 @@ export function Taskbar() {
       )}
 
       <div
-        className="h-8 flex-shrink-0 flex items-center justify-between px-4 z-[999] relative"
+        className="relative z-[999] flex min-h-8 flex-shrink-0 flex-wrap items-center justify-between gap-x-2 gap-y-1 px-2 sm:px-4"
         style={
           {
             background:
@@ -72,7 +72,7 @@ export function Taskbar() {
       >
         {/* LEFT — Logo + active apps */}
         <div
-          className="flex items-center gap-3"
+          className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3 md:max-w-none md:flex-none"
           style={{ WebkitAppRegion: "no-drag" } as any}
         >
           {/* Logo */}
@@ -85,19 +85,19 @@ export function Taskbar() {
             >
               <div className="w-1.5 h-1.5 rounded-full bg-black/60" />
             </div>
-            <span className="text-[10px] font-black tracking-[4px] uppercase">
+            <span className="hidden text-[10px] font-black uppercase tracking-[4px] sm:inline">
               <span className="text-cyan-400">AX</span>
               <span className="text-purple-400">IOM</span>
             </span>
           </div>
 
           {/* Divider */}
-          <div className="w-px h-3 bg-white/10" />
+          <div className="hidden h-3 w-px bg-white/10 sm:block" />
 
           {/* Spotlight trigger */}
           <button
             onClick={() => setSpotlight(true)}
-            className="flex items-center gap-1.5 px-2 py-0.5 rounded-md hover:bg-white/[0.06] transition-colors group"
+            className="group flex items-center gap-1.5 rounded-md px-2 py-0.5 transition-colors hover:bg-white/[0.06]"
           >
             <svg
               width="10"
@@ -111,10 +111,10 @@ export function Taskbar() {
               <circle cx="11" cy="11" r="8" />
               <path d="m21 21-4.35-4.35" />
             </svg>
-            <span className="text-[9px] text-slate-700 group-hover:text-slate-400 transition-colors">
+            <span className="hidden text-[9px] text-slate-700 transition-colors group-hover:text-slate-400 sm:inline">
               Search
             </span>
-            <kbd className="text-[7px] text-slate-800 bg-white/5 px-1 rounded border border-white/10">
+            <kbd className="hidden text-[7px] text-slate-800 bg-white/5 px-1 rounded border border-white/10 md:inline">
               ⌘Space
             </kbd>
           </button>
@@ -122,8 +122,8 @@ export function Taskbar() {
           {/* Active window count */}
           {windows.filter((w) => !w.minimized).length > 0 && (
             <>
-              <div className="w-px h-3 bg-white/10" />
-              <div className="flex items-center gap-1">
+              <div className="hidden h-3 w-px bg-white/10 md:block" />
+              <div className="hidden items-center gap-1 md:flex">
                 {windows
                   .filter((w) => !w.minimized)
                   .slice(0, 4)
@@ -150,11 +150,11 @@ export function Taskbar() {
 
         {/* RIGHT — System controls */}
         <div
-          className="flex items-center gap-1"
+          className="ml-auto flex shrink-0 items-center gap-0.5 sm:gap-1"
           style={{ WebkitAppRegion: "no-drag" } as any}
         >
           {/* Date */}
-          <div className="px-2 py-0.5 rounded-md">
+          <div className="hidden rounded-md px-2 py-0.5 sm:block">
             <span className="text-[9px] text-slate-600">{date}</span>
           </div>
 

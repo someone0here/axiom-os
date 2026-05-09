@@ -14,6 +14,20 @@ import { registerSyncHandlers } from "./ipc/sync";
 
 let mainWindow: BrowserWindow | null = null;
 
+// Allow WebSocket connections to Nostr relays — some relay SSL certs
+// can fail verification which silently kills the wss:// connection
+app.on(
+  "certificate-error",
+  (event, _webContents, url, _error, _cert, callback) => {
+    if (url.startsWith("wss://") || url.startsWith("ws://")) {
+      event.preventDefault();
+      callback(true); // trust relay certs
+    } else {
+      callback(false);
+    }
+  },
+);
+
 // Find the correct path to index.html regardless of platform
 function getIndexPath(): string {
   // In production, __dirname = .../resources/app.asar/electron/dist
@@ -56,12 +70,7 @@ app.whenReady().then(() => {
   registerSnapshotHandlers(DATA_DIR, () => store.key);
   registerSyncHandlers(DATA_DIR, () => store.key);
 
-  globalShortcut.register("Escape", () => {
-    if (mainWindow?.isKiosk()) {
-      mainWindow.setKiosk(false);
-      mainWindow.webContents.send("fullscreen-change", false);
-    }
-  });
+  globalShortcut.register("Escape", () => false);
 
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -69,6 +78,8 @@ app.whenReady().then(() => {
     frame: false,
     titleBarStyle: "hidden",
     trafficLightPosition: { x: -100, y: -100 },
+    minimizable: true,
+    closable: true,
     fullscreenable: true,
     transparent: false,
     backgroundColor: "#040409",
@@ -76,7 +87,9 @@ app.whenReady().then(() => {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
-      devTools: process.env.NODE_ENV === "development",
+      webSecurity: false, // allows wss:// connections from file:// context
+      allowRunningInsecureContent: false,
+      devTools: true, // always on so you can debug network issues
     },
   });
 

@@ -32,14 +32,14 @@ export function Spotlight() {
     <AnimatePresence>
       {spotlightOpen && (
         <motion.div
-          className="absolute inset-0 z-[9998] flex items-start justify-center pt-20"
+          className="absolute inset-0 z-[9998] flex items-start justify-center overflow-y-auto px-3 pb-8 pt-12 sm:pt-20"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           onClick={() => setSpotlight(false)}
         >
           <motion.div
-            className="w-[500px] bg-[#0a0a1a]/96 border border-white/10 rounded-2xl overflow-hidden shadow-2xl backdrop-blur-xl"
+            className="w-full max-w-[min(500px,calc(100vw-1.5rem))] rounded-2xl border border-white/10 bg-[#0a0a1a]/96 shadow-2xl backdrop-blur-xl overflow-hidden"
             initial={{ y: -16, scale: 0.97 }}
             animate={{ y: 0, scale: 1 }}
             exit={{ y: -16, scale: 0.97 }}

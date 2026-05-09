@@ -114,11 +114,11 @@ export function Login({ profileId, onSuccess, onBack }: Props) {
   if (showRecovery) {
     return (
       <motion.div
-        className="fixed inset-0 bg-[#040409] flex items-center justify-center"
+        className="fixed inset-0 flex items-center justify-center overflow-y-auto bg-[#040409] px-4 py-8"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
       >
-        <div className="w-96 p-8 rounded-2xl bg-white/[0.04] border border-white/[0.08] flex flex-col gap-5">
+        <div className="mx-auto flex w-full max-w-md flex-col gap-5 rounded-2xl border border-white/[0.08] bg-white/[0.04] p-5 sm:p-8">
           <div className="text-center">
             <div className="text-lg mb-1">⚠️</div>
             <div className="text-sm font-semibold text-slate-200">
@@ -130,7 +130,7 @@ export function Login({ profileId, onSuccess, onBack }: Props) {
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             {recoveryPhrase.map((word, i) => (
               <div
                 key={i}
@@ -168,12 +168,12 @@ export function Login({ profileId, onSuccess, onBack }: Props) {
   if (showForgot) {
     return (
       <motion.div
-        className="fixed inset-0 bg-[#040409] flex items-center justify-center"
+        className="fixed inset-0 flex items-center justify-center overflow-y-auto bg-[#040409] px-4 py-8"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
       >
-        <div className="w-80 p-8 rounded-2xl bg-white/[0.04] border border-white/[0.08] flex flex-col items-center gap-5">
+        <div className="mx-auto flex w-full max-w-sm flex-col items-center gap-5 rounded-2xl border border-white/[0.08] bg-white/[0.04] p-5 sm:p-8">
           <div className="text-center">
             <div className="text-sm font-semibold text-slate-200">
               Recover Vault
@@ -251,12 +251,12 @@ export function Login({ profileId, onSuccess, onBack }: Props) {
   // Normal login / setup screen
   return (
     <motion.div
-      className="fixed inset-0 bg-[#040409] flex items-center justify-center"
+      className="fixed inset-0 flex items-center justify-center overflow-y-auto bg-[#040409] px-4 py-8"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
     >
-      <div className="w-80 p-8 rounded-2xl bg-white/[0.04] border border-white/[0.08] flex flex-col items-center gap-5">
+      <div className="mx-auto flex w-full max-w-sm flex-col items-center gap-5 rounded-2xl border border-white/[0.08] bg-white/[0.04] p-5 sm:p-8">
         <div className="w-14 h-14 rounded-full bg-purple-500/15 border border-white/10 flex items-center justify-center text-2xl">
           ◈
         </div>

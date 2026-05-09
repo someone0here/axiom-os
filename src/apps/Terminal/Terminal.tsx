@@ -73,10 +73,10 @@ export default function Terminal() {
 
   return (
     <div
-      className="flex flex-col h-full bg-[#020206] font-mono"
+      className="flex h-full min-h-0 flex-col bg-[#020206] font-mono"
       onClick={() => inp.current?.focus()}
     >
-      <div className="flex-1 overflow-y-auto p-3 text-[11px] leading-6">
+      <div className="min-h-0 flex-1 overflow-y-auto p-2 text-[11px] leading-6 sm:p-3">
         {lines.map((l, i) => (
           <div key={i} className={colors[l.type]}>
             {l.text}
@@ -84,8 +84,8 @@ export default function Terminal() {
         ))}
         <div ref={bottom} />
       </div>
-      <div className="flex items-center gap-2 px-3 py-2 border-t border-white/[0.05]">
-        <span className="text-cyan-400 text-[11px] flex-shrink-0">
+      <div className="flex flex-shrink-0 items-center gap-2 border-t border-white/[0.05] px-2 py-2 sm:px-3">
+        <span className="shrink-0 text-[10px] text-cyan-400 sm:text-[11px]">
           axiom@vault:~$
         </span>
         <input
@@ -108,7 +108,7 @@ export default function Terminal() {
               setInput(i < 0 ? "" : hist[i]);
             }
           }}
-          className="flex-1 bg-transparent text-slate-200 text-[11px] outline-none"
+          className="min-w-0 flex-1 bg-transparent text-[11px] text-slate-200 outline-none"
         />
       </div>
     </div>

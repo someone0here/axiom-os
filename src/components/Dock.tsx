@@ -11,8 +11,8 @@ export function Dock() {
     windows.some((w) => w.appId === id && !w.minimized);
 
   return (
-    <div className="flex justify-center pb-2 pt-1 flex-shrink-0 z-50">
-      <div className="flex items-center gap-1 px-3 py-2 bg-white/[0.06] border border-white/[0.09] rounded-2xl backdrop-blur-md">
+    <div className="z-50 flex flex-shrink-0 justify-center px-2 pb-2 pt-1">
+      <div className="no-scrollbar flex max-w-full items-center gap-0.5 overflow-x-auto overflow-y-hidden rounded-2xl border border-white/[0.09] bg-white/[0.06] px-2 py-1.5 backdrop-blur-md sm:gap-1 sm:px-3 sm:py-2">
         {apps.map((app) => (
           <DockIcon
             key={app.id}
@@ -23,7 +23,7 @@ export function Dock() {
             onClick={() => open(app.id)}
           />
         ))}
-        <div className="w-px h-7 bg-white/[0.08] mx-1" />
+        <div className="mx-0.5 h-7 w-px shrink-0 bg-white/[0.08] sm:mx-1" />
         <DockIcon
           icon="🔒"
           label="Lock"
@@ -64,7 +64,7 @@ function DockIcon({
       <button
         onClick={onClick}
         style={{ background: bg }}
-        className="w-11 h-11 rounded-xl flex items-center justify-center text-lg hover:-translate-y-1.5 hover:scale-110 transition-transform duration-150"
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-base transition-transform duration-150 hover:-translate-y-1 hover:scale-110 sm:h-11 sm:w-11 sm:text-lg"
       >
         {icon}
       </button>

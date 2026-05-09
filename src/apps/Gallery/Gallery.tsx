@@ -39,7 +39,7 @@ export default function Gallery() {
     );
 
   return (
-    <div className="flex flex-col h-full relative">
+    <div className="relative flex h-full min-h-0 flex-col">
       {/* Fullscreen viewer */}
       {selected && (
         <div
@@ -77,7 +77,7 @@ export default function Gallery() {
           </span>
         </div>
       ) : (
-        <div className="flex-1 overflow-y-auto p-4 grid grid-cols-3 gap-3">
+        <div className="grid min-h-0 flex-1 grid-cols-2 gap-2 overflow-y-auto p-2 sm:grid-cols-3 sm:gap-3 sm:p-4">
           {images.map((img) => (
             <div
               key={img.id}

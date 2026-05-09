@@ -46,6 +46,8 @@ const APP_DEFAULTS: Record<string, Partial<AppWindow>> = {
   notes: { title: "Notes", width: 640, height: 420 },
   files: { title: "Files", width: 700, height: 480 },
   vault: { title: "Vault", width: 480, height: 400 },
+  chat: { title: "Chat", width: 700, height: 480 },
+  social: { title: "Social", width: 720, height: 520 },
   gallery: { title: "Gallery", width: 700, height: 500 },
   terminal: { title: "Terminal", width: 560, height: 360 },
   settings: { title: "Settings", width: 560, height: 420 },
@@ -59,6 +61,21 @@ export const useDesktop = create<DesktopStore>((set, get) => ({
   zCounter: 10,
 
   open: (appId) => {
+    const minimized = get().windows.find(
+      (w) => w.appId === appId && w.minimized,
+    );
+    if (minimized) {
+      const z = get().zCounter + 1;
+      set((s) => ({
+        activeId: minimized.id,
+        zCounter: z,
+        windows: s.windows.map((w) =>
+          w.id === minimized.id ? { ...w, minimized: false, zIndex: z } : w,
+        ),
+      }));
+      return;
+    }
+
     const existing = get().windows.find(
       (w) => w.appId === appId && !w.minimized,
     );
@@ -70,14 +87,34 @@ export const useDesktop = create<DesktopStore>((set, get) => ({
     const z = get().zCounter + 1;
     const offset = get().windows.length * 24;
     const def = APP_DEFAULTS[appId] || {};
+    const vw =
+      typeof window !== "undefined" ? window.innerWidth : 1920;
+    const vh =
+      typeof window !== "undefined" ? window.innerHeight : 1080;
+    const pad = 12;
+    const reservedChrome = 96;
+    const baseW = def.width || 500;
+    const baseH = def.height || 380;
+    const width = Math.max(
+      280,
+      Math.min(baseW, vw - pad * 2),
+    );
+    const height = Math.max(
+      200,
+      Math.min(baseH, vh - reservedChrome),
+    );
+    const maxX = Math.max(pad, vw - width - pad);
+    const maxY = Math.max(pad, vh - height - pad);
+    const x = Math.min(60 + offset, maxX);
+    const y = Math.min(40 + offset, maxY);
     const win: AppWindow = {
       id: _id++,
       appId,
       title: def.title || appId,
-      x: 60 + offset,
-      y: 40 + offset,
-      width: def.width || 500,
-      height: def.height || 380,
+      x,
+      y,
+      width,
+      height,
       zIndex: z,
       minimized: false,
       maximized: false,

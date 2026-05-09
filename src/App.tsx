@@ -49,7 +49,7 @@ export default function App() {
   };
 
   return (
-    <div className="w-screen h-screen overflow-hidden bg-[#040409]">
+    <div className="flex h-[100dvh] max-h-[100dvh] min-h-0 w-full max-w-[100vw] flex-col overflow-hidden bg-[#040409]">
       <AnimatePresence mode="wait">
         {screen === "boot" && (
           <Boot key="boot" onComplete={handleBootComplete} />
